@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bank Management System</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🏦 Bank Management System</div>
+    <nav>
+      <a href="index.html">Dashboard</a>
+      <a href="login.html">Login</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Team Workspace</h1>
+      <p>
+        Starter UI. Each candidate owns one card below and one JavaScript file in
+        <code>frontend/js/</code>. Replace the placeholder panels with your working
+        screens as you implement your endpoints in <code>backend/candidate*_.../</code>.
+      </p>
+    </section>
+
+    <section class="grid">
+      <article class="card" id="card-c1">
+        <h2>Candidate 1 · Account Management</h2>
+        <p class="muted">FR-01 create · FR-04 modify · FR-05 close</p>
+        <div id="panel-c1" class="panel">Loading…</div>
+      </article>
+
+      <article class="card" id="card-c2">
+        <h2>Candidate 2 · Transactions</h2>
+        <p class="muted">FR-08 deposit · FR-09 withdraw · FR-12 balance</p>
+        <div id="panel-c2" class="panel">Loading…</div>
+      </article>
+
+      <article class="card" id="card-c3">
+        <h2>Candidate 3 · Records</h2>
+        <p class="muted">FR-13 transfer · FR-15 history · FR-17 statement</p>
+        <div id="panel-c3" class="panel">Loading…</div>
+      </article>
+
+      <article class="card" id="card-c4">
+        <h2>Candidate 4 · Security</h2>
+        <p class="muted">FR-18 staff login · FR-19 customer login · FR-20 PIN change</p>
+        <div id="panel-c4" class="panel">Loading…</div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Bank Management System · template v1.0</span>
+    <span id="api-status">API: checking…</span>
+  </footer>
+
+  <!-- Shared helper first, then one file per candidate (edit ONLY yours) -->
+  <script src="js/app.js"></script>
+  <script src="js/candidate1_accounts.js"></script>
+  <script src="js/candidate2_transactions.js"></script>
+  <script src="js/candidate3_records.js"></script>
+  <script src="js/candidate4_security.js"></script>
+</body>
+</html>

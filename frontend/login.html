@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login · Bank Management System</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🏦 Bank Management System</div>
+    <nav><a href="index.html">Dashboard</a></nav>
+  </header>
+
+  <main class="container narrow">
+    <h1>Login</h1>
+    <!-- Owned by CANDIDATE 4 (FR-18 staff login / FR-19 customer login).
+         Wire these forms to the endpoints in backend/candidate4_security/. -->
+    <section class="card">
+      <h2>Staff (Admin)</h2>
+      <form id="staff-form">
+        <label>Username <input type="text" id="staff-user" placeholder="admin" required /></label>
+        <label>Password <input type="password" id="staff-pass" required /></label>
+        <button type="submit">Sign in as staff</button>
+      </form>
+      <p id="staff-msg" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <h2>Customer (self-service)</h2>
+      <form id="customer-form">
+        <label>Account number <input type="number" id="cust-acc" placeholder="1001" required /></label>
+        <label>PIN <input type="password" id="cust-pin" maxlength="6" required /></label>
+        <button type="submit">Sign in as customer</button>
+      </form>
+      <p id="cust-msg" class="muted"></p>
+    </section>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script src="js/candidate4_security.js"></script>
+</body>
+</html>

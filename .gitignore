@@ -1,0 +1,18 @@
+# build artifacts
+backend/bank_server
+backend/*.o
+*.log
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# local environment / secrets
+.env
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,106 @@
+/* ==========================================================================
+   Bank Management System - shared stylesheet
+   Owner: SHARED - candidates may add styles inside a clearly marked
+   "Candidate N" comment block at the end of this file. Do not restyle
+   other candidates' sections.
+   ========================================================================== */
+:root {
+  --navy: #12314f;
+  --navy-2: #1c4368;
+  --gold: #c9a84c;
+  --bg: #f4f6f9;
+  --card: #ffffff;
+  --ink: #1c2530;
+  --muted: #67707c;
+  --ok: #1e8e5a;
+  --bad: #c0392b;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  background: var(--navy);
+  color: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 28px;
+}
+.topbar .brand { font-weight: 700; letter-spacing: 0.3px; }
+.topbar nav a { color: #dfe7f0; margin-left: 18px; text-decoration: none; }
+.topbar nav a:hover { color: var(--gold); }
+
+.container { flex: 1; max-width: 1100px; width: 100%; margin: 0 auto; padding: 28px 20px; }
+.container.narrow { max-width: 560px; }
+
+.hero h1 { color: var(--navy); margin-bottom: 8px; }
+.hero p { color: var(--muted); line-height: 1.6; margin-bottom: 24px; }
+code { background: #e9edf3; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid #e3e8ee;
+  border-top: 3px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: 0 1px 3px rgba(16, 32, 52, 0.06);
+}
+.card h2 { font-size: 1.02rem; color: var(--navy); margin-bottom: 4px; }
+.muted { color: var(--muted); font-size: 0.86rem; }
+
+.panel { margin-top: 12px; font-size: 0.9rem; }
+.panel button { margin: 4px 6px 4px 0; }
+
+button {
+  background: var(--navy-2);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+button:hover { background: var(--navy); }
+
+form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+label { font-size: 0.88rem; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+input {
+  padding: 9px 10px;
+  border: 1px solid #cfd6df;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+input:focus { outline: 2px solid var(--gold); border-color: transparent; }
+
+.footer {
+  background: var(--navy);
+  color: #b9c4d0;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 28px;
+  font-size: 0.82rem;
+}
+
+.msg-ok { color: var(--ok); }
+.msg-bad { color: var(--bad); }
+
+pre {
+  background: #f2f4f7;
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  margin-top: 6px;
+}
