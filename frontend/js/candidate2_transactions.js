@@ -6,19 +6,22 @@
    Contract: tests/integration/test_candidate2_transactions.py
    ========================================================================== */
 
-document.getElementById("panel-c2").innerHTML =
-  '<p class="muted">Owned by Candidate 2. Replace this panel with the ' +
-  'deposit / withdraw / balance screens.</p>';
+document.getElementById("panel-c2").innerHTML = `
+  <div class="card">
+    <h3>Check Balance (FR-12)</h3>
+    <form id="balance-form">
+      <input type="number" id="balance-account-number" placeholder="Account Number" required>
+      <button type="submit">Check Balance</button>
+    </form>
+    <div id="balance-result"></div>
+  </div>
+`;
 
-// TODO(Candidate 2): build the deposit, withdraw and balance forms.
-// Example call once your endpoint works:
-//
-// async function deposit(accountNumber, amount) {
-//   const r = await api("POST", `/api/accounts/${accountNumber}/deposit`, { amount });
-//   showResult(document.getElementById("panel-c2"), r, "Deposit posted");
-// }
-//
-// async function balance(accountNumber) {
-//   const r = await api("GET", `/api/accounts/${accountNumber}/balance`);
-//   showResult(document.getElementById("panel-c2"), r, "Balance fetched");
-// }
+document.getElementById("balance-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const accNum = document.getElementById("balance-account-number").value;
+  const resultDiv = document.getElementById("balance-result");
+  
+  const r = await api("GET", \`/api/accounts/\${accNum}/balance\`);
+  showResult(resultDiv, r, "Balance fetched");
+});

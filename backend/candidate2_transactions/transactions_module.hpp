@@ -44,8 +44,26 @@ inline void register_transaction_routes(httplib::Server& svr) {
   // Failure -> 404 unknown account
   // -------------------------------------------------------------------------
   svr.Get(R"(/api/accounts/(\d+)/balance)", [](const httplib::Request& req, httplib::Response& res) {
-    // TODO(Candidate 2): implement (simple SELECT balance ...)
-    http_utils::not_implemented(res, "FR-12 balance inquiry",
-                                "Candidate 2 (backend/candidate2_transactions/transactions_module.hpp)");
+    std::string id = req.matches[1];
+    std::string sql = "SELECT balance FROM accounts WHERE account_number = " + id;
+    
+    MYSQL_RES* result = Database::instance().select(sql);
+    if (!result) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+    
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (!row) {
+      mysql_free_result(result);
+      http_utils::error_json(res, 404, "Unknown account");
+      return;
+    }
+    
+    std::string balance = row[0] ? row[0] : "0.00";
+    mysql_free_result(result);
+    
+    std::string json = "{\"account_number\": " + id + ", \"balance\": " + balance + "}";
+    res.set_content(json, "application/json");
   });
 }
