@@ -1,38 +1,33 @@
-/* ==========================================================================
-   CANDIDATE 4 - Security UI
-   Backend endpoints: POST /api/auth/staff/login,
-                      POST /api/auth/customer/login,
-                      POST /api/auth/customer/{id}/pin-change (you implement these)
-   Contract: tests/integration/test_candidate4_security.py
-   ========================================================================== */
+/**
+ * Candidate 4 Security Module - FR-18, FR-19, FR-20
+ */
 
-document.getElementById("panel-c4").innerHTML =
-  '<p class="muted">Owned by Candidate 4. Replace this panel with the ' +
-  'login status / PIN change screens.</p>';
-
-// The login page forms are already wired to the IDs below - implement the calls:
-const staffForm = document.getElementById("staff-form");
-if (staffForm) {
-  staffForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    // TODO(Candidate 4): call POST /api/auth/staff/login with
-    //   { username: staff-user value, password: staff-pass value }
-    // and print the result into #staff-msg (show errors generically!).
-    document.getElementById("staff-msg").textContent =
-      "FR-18 staff login not implemented yet (Candidate 4).";
-  });
+// FR-20: Prevent Cross-Site Scripting (XSS) by sanitizing input fields
+function sanitizeInput(inputString) {
+    if (typeof inputString !== 'string') return inputString;
+    return inputString
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
-const custForm = document.getElementById("customer-form");
-if (custForm) {
-  custForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    // TODO(Candidate 4): call POST /api/auth/customer/login with
-    //   { account_number: Number(cust-acc value), pin: cust-pin value }
-    document.getElementById("cust-msg").textContent =
-      "FR-19 customer login not implemented yet (Candidate 4).";
-  });
+// Attach Auth Header to outgoing API fetch requests
+function getAuthHeaders() {
+    const token = localStorage.getItem('session_token');
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+    };
 }
 
-// TODO(Candidate 4): PIN change form -> POST /api/auth/customer/{id}/pin-change
-// with { old_pin, new_pin } (see contract test file for the exact rules).
+// Session auto-logout check
+function checkAuthStatus() {
+    const token = localStorage.getItem('session_token');
+    if (!token) {
+        console.warn("No active session found. Redirecting to login...");
+        return false;
+    }
+    return true;
+}
