@@ -236,9 +236,49 @@ inline void register_record_routes(httplib::Server& svr) {
   // -------------------------------------------------------------------------
   svr.Get(R"(/api/accounts/(\d+)/transactions)",
       [](const httplib::Request& req, httplib::Response& res) {
-    // TODO: implemented in FR-15 commit
-    http_utils::not_implemented(res, "FR-15 transaction history",
-                                "Candidate 3 (backend/candidate3_records/records_module.hpp)");
+    long account = c3::path_id(req);
+    if (account <= 0) {
+      http_utils::error_json(res, 400, "Invalid account number");
+      return;
+    }
+
+    try {
+      Database& db = Database::instance();
+
+      // Verify account exists.
+      MYSQL_RES* chk = db.select(
+          "SELECT 1 FROM accounts WHERE account_number = " + std::to_string(account));
+      if (!chk) { http_utils::error_json(res, 500, "Database error"); return; }
+      bool exists = mysql_num_rows(chk) > 0;
+      mysql_free_result(chk);
+      if (!exists) { http_utils::error_json(res, 404, "Account not found"); return; }
+
+      // Return all transactions in consistent chronological order.
+      MYSQL_RES* rs = c3::query(db,
+          "SELECT id,type,amount,balance_after,related_account,created_at "
+          "FROM transactions WHERE account_number = " + std::to_string(account) +
+          " ORDER BY created_at ASC, id ASC");
+
+      std::ostringstream items;
+      unsigned long count = 0;
+      MYSQL_ROW row;
+      while ((row = mysql_fetch_row(rs))) {
+        if (count) items << ',';
+        items << c3::tx_json(row);
+        ++count;
+      }
+      mysql_free_result(rs);
+
+      res.status = 200;
+      res.set_content(
+          "{\"account_number\":" + std::to_string(account) +
+          ",\"count\":"          + std::to_string(count) +
+          ",\"transactions\":["  + items.str() + "]}",
+          "application/json");
+
+    } catch (const std::exception&) {
+      http_utils::error_json(res, 500, "Could not retrieve transaction history");
+    }
   });
 
   // -------------------------------------------------------------------------
