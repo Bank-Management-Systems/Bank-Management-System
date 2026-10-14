@@ -22,9 +22,123 @@ inline void register_record_routes(httplib::Server& svr) {
   // Failure -> 400 (insufficient funds / unknown or closed account / amount<=0)
   // -------------------------------------------------------------------------
   svr.Post("/api/transfers", [](const httplib::Request& req, httplib::Response& res) {
-    // TODO(Candidate 3): implement with an explicit SQL transaction
-    http_utils::not_implemented(res, "FR-13 transfer",
-                                "Candidate 3 (backend/candidate3_records/records_module.hpp)");
+    long from_acc = http_utils::get_number(req.body, "from_account", 0);
+    long to_acc = http_utils::get_number(req.body, "to_account", 0);
+    long amount = http_utils::get_number(req.body, "amount", 0);
+
+    if (amount <= 0) {
+      http_utils::error_json(res, 400, "Transfer amount must be greater than zero");
+      return;
+    }
+
+    if (from_acc <= 0 || to_acc <= 0) {
+      http_utils::error_json(res, 400, "Invalid account number");
+      return;
+    }
+
+    if (from_acc == to_acc) {
+      http_utils::error_json(res, 400, "Cannot transfer to the same account");
+      return;
+    }
+
+    Database& db = Database::instance();
+    db.exec("START TRANSACTION");
+
+    // Query both accounts in ordered sequence to prevent deadlock
+    std::string first_id = std::to_string(std::min(from_acc, to_acc));
+    std::string second_id = std::to_string(std::max(from_acc, to_acc));
+    std::string lock_sql = "SELECT account_number, balance, status FROM accounts "
+                           "WHERE account_number IN (" + first_id + ", " + second_id + ") FOR UPDATE";
+
+    MYSQL_RES* lock_res = db.select(lock_sql);
+    if (!lock_res) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    double from_balance = 0.0, to_balance = 0.0;
+    std::string from_status = "", to_status = "";
+    bool from_found = false, to_found = false;
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(lock_res))) {
+      long acc_no = row[0] ? std::stol(row[0]) : 0;
+      double bal = row[1] ? std::stod(row[1]) : 0.0;
+      std::string stat = row[2] ? row[2] : "";
+
+      if (acc_no == from_acc) {
+        from_found = true;
+        from_balance = bal;
+        from_status = stat;
+      } else if (acc_no == to_acc) {
+        to_found = true;
+        to_balance = bal;
+        to_status = stat;
+      }
+    }
+    mysql_free_result(lock_res);
+
+    if (!from_found || !to_found) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 404, "Unknown account: source or destination account does not exist");
+      return;
+    }
+
+    if (from_status == "closed" || to_status == "closed") {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 400, "Cannot transfer: account is closed");
+      return;
+    }
+
+    if (from_balance - amount < 500.0) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 400, "Insufficient funds: sender must maintain minimum balance of Rs. 500");
+      return;
+    }
+
+    double new_from = from_balance - amount;
+    double new_to = to_balance + amount;
+
+    std::string debit_sql = "UPDATE accounts SET balance = balance - " + std::to_string(amount) +
+                            " WHERE account_number = " + std::to_string(from_acc);
+    std::string credit_sql = "UPDATE accounts SET balance = balance + " + std::to_string(amount) +
+                             " WHERE account_number = " + std::to_string(to_acc);
+
+    if (!db.exec(debit_sql) || !db.exec(credit_sql)) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 500, "Failed to update balances");
+      return;
+    }
+
+    char buf_from[64], buf_to[64], buf_amt[64];
+    snprintf(buf_from, sizeof(buf_from), "%.2f", new_from);
+    snprintf(buf_to, sizeof(buf_to), "%.2f", new_to);
+    snprintf(buf_amt, sizeof(buf_amt), "%.2f", static_cast<double>(amount));
+
+    std::string out_sql = "INSERT INTO transactions (account_number, type, amount, balance_after, related_account) VALUES (" +
+                          std::to_string(from_acc) + ", 'TRANSFER_OUT', " + std::to_string(amount) + ", " +
+                          std::string(buf_from) + ", " + std::to_string(to_acc) + ")";
+    std::string in_sql = "INSERT INTO transactions (account_number, type, amount, balance_after, related_account) VALUES (" +
+                         std::to_string(to_acc) + ", 'TRANSFER_IN', " + std::to_string(amount) + ", " +
+                         std::string(buf_to) + ", " + std::to_string(from_acc) + ")";
+
+    if (!db.exec(out_sql) || !db.exec(in_sql)) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 500, "Failed to record transaction log");
+      return;
+    }
+
+    db.exec("COMMIT");
+
+    std::string json = "{\"from_account\":" + std::to_string(from_acc) +
+                       ",\"to_account\":" + std::to_string(to_acc) +
+                       ",\"amount\":" + std::string(buf_amt) +
+                       ",\"from_balance\":" + std::string(buf_from) +
+                       ",\"to_balance\":" + std::string(buf_to) + "}";
+
+    res.status = 200;
+    res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------

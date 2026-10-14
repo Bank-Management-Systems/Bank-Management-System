@@ -8,6 +8,17 @@
 
 document.getElementById("panel-c3").innerHTML = `
   <div class="card" style="margin-bottom: 14px;">
+    <h3>Transfer Funds (FR-13)</h3>
+    <form id="transfer-form">
+      <input type="number" id="transfer-from-account" placeholder="From Account Number" required>
+      <input type="number" id="transfer-to-account" placeholder="To Account Number" required>
+      <input type="number" id="transfer-amount" placeholder="Amount (Rs.)" min="1" required>
+      <button type="submit">Transfer Funds</button>
+    </form>
+    <div id="transfer-result" style="margin-top: 10px;"></div>
+  </div>
+
+  <div class="card" style="margin-bottom: 14px;">
     <h3>Transaction History (FR-15)</h3>
     <form id="history-form">
       <input type="number" id="history-account-number" placeholder="Account Number" required>
@@ -38,6 +49,28 @@ document.getElementById("panel-c3").innerHTML = `
     <div id="statement-result" style="margin-top: 10px;"></div>
   </div>
 `;
+
+// FR-13: Fund transfer
+document.getElementById("transfer-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fromAcc = Number(document.getElementById("transfer-from-account").value);
+  const toAcc = Number(document.getElementById("transfer-to-account").value);
+  const amount = Number(document.getElementById("transfer-amount").value);
+  const resultDiv = document.getElementById("transfer-result");
+
+  const r = await api("POST", "/api/transfers", {
+    from_account: fromAcc,
+    to_account: toAcc,
+    amount,
+  });
+
+  if (r.status === 200 && r.data) {
+    showResult(resultDiv, r, "Transfer completed successfully");
+    document.getElementById("transfer-amount").value = "";
+  } else {
+    showResult(resultDiv, r, "Transfer failed");
+  }
+});
 
 // FR-15: View transaction history
 document.getElementById("history-form").addEventListener("submit", async (e) => {
@@ -156,5 +189,6 @@ document.getElementById("statement-form").addEventListener("submit", async (e) =
 document.getElementById("btn-print-statement").addEventListener("click", () => {
   window.print();
 });
+
 
 
