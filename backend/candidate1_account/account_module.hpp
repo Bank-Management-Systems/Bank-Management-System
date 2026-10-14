@@ -19,15 +19,54 @@ inline void register_account_routes(httplib::Server& svr) {
   // Failure -> 400 {"error": "..."} (blank name, deposit below minimum, ...)
   // -------------------------------------------------------------------------
   svr.Post("/api/accounts", [](const httplib::Request& req, httplib::Response& res) {
-    // TODO(Candidate 1): implement
-    //   1) name  = http_utils::get_string(req.body, "name");
-    //      deposit = http_utils::get_number(req.body, "opening_deposit");
-    //   2) validate: name not empty, deposit >= 500  -> else http_utils::error_json(res, 400, ...)
-    //   3) INSERT INTO accounts (name, address, contact, type, balance) VALUES (...)
-    //      using Database::instance().exec(...)  -> then last_insert_id()
-    //   4) res.status = 201; return JSON with the new account number
-    http_utils::not_implemented(res, "FR-01 create account",
-                                "Candidate 1 (backend/candidate1_account/account_module.hpp)");
+    std::string name = http_utils::trim(http_utils::get_string(req.body, "name"));
+    if (name.empty()) {
+      http_utils::error_json(res, 400, "Name is mandatory and cannot be blank");
+      return;
+    }
+
+    long deposit = http_utils::get_number(req.body, "opening_deposit", 0);
+    if (deposit < 500) {
+      http_utils::error_json(res, 400, "Opening deposit must be at least Rs. 500");
+      return;
+    }
+
+    std::string address = http_utils::trim(http_utils::get_string(req.body, "address"));
+    std::string contact = http_utils::trim(http_utils::get_string(req.body, "contact"));
+    std::string type = http_utils::trim(http_utils::get_string(req.body, "type"));
+    if (type != "Savings" && type != "Current") {
+      type = "Savings";
+    }
+
+    auto sql_escape = [](const std::string& s) {
+      std::string out;
+      for (char c : s) {
+        if (c == '\'') out += "''";
+        else if (c == '\\') out += "\\\\";
+        else out += c;
+      }
+      return out;
+    };
+
+    Database& db = Database::instance();
+    std::string sql = "INSERT INTO accounts (name, address, contact, type, balance, status) VALUES ('" +
+                      sql_escape(name) + "', '" +
+                      sql_escape(address) + "', '" +
+                      sql_escape(contact) + "', '" +
+                      sql_escape(type) + "', " +
+                      std::to_string(deposit) + ", 'active')";
+
+    if (!db.exec(sql)) {
+      http_utils::error_json(res, 500, "Failed to create account");
+      return;
+    }
+
+    unsigned long new_id = db.last_insert_id();
+    res.status = 201;
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%.2f", static_cast<double>(deposit));
+    std::string json = "{\"account_number\": " + std::to_string(new_id) + ", \"balance\": " + std::string(buffer) + "}";
+    res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------

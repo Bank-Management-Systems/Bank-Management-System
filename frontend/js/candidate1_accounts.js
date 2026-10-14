@@ -7,6 +7,25 @@
 
 document.getElementById("panel-c1").innerHTML = `
   <div class="card" style="margin-bottom: 14px;">
+    <h3>Open New Account (FR-01)</h3>
+    <form id="create-account-form">
+      <input type="text" id="create-name" placeholder="Full Customer Name" required>
+      <input type="text" id="create-address" placeholder="Address" required>
+      <input type="text" id="create-contact" placeholder="Contact Number (10 digits)" required>
+      <label>
+        Account Type:
+        <select id="create-type" style="padding: 9px 10px; border: 1px solid #cfd6df; border-radius: 6px; font-size: 0.95rem; background: #fff;">
+          <option value="Savings">Savings</option>
+          <option value="Current">Current</option>
+        </select>
+      </label>
+      <input type="number" id="create-deposit" placeholder="Opening Deposit (Min. Rs. 500)" min="500" value="500" required>
+      <button type="submit">Create Account</button>
+    </form>
+    <div id="create-result" style="margin-top: 8px;"></div>
+  </div>
+
+  <div class="card" style="margin-bottom: 14px;">
     <h3>Modify Customer Details (FR-04)</h3>
     <form id="modify-details-form">
       <div style="display: flex; gap: 8px;">
@@ -29,6 +48,33 @@ document.getElementById("panel-c1").innerHTML = `
     <div id="close-result" style="margin-top: 8px;"></div>
   </div>
 `;
+
+// FR-01: Create new account
+document.getElementById("create-account-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = document.getElementById("create-name").value.trim();
+  const address = document.getElementById("create-address").value.trim();
+  const contact = document.getElementById("create-contact").value.trim();
+  const type = document.getElementById("create-type").value;
+  const deposit = Number(document.getElementById("create-deposit").value);
+  const resultDiv = document.getElementById("create-result");
+
+  const r = await api("POST", "/api/accounts", {
+    name,
+    address,
+    contact,
+    type,
+    opening_deposit: deposit,
+  });
+
+  if (r.status === 201 && r.data && r.data.account_number) {
+    showResult(resultDiv, r, `Account #${r.data.account_number} created successfully`);
+    document.getElementById("create-account-form").reset();
+    document.getElementById("create-deposit").value = "500";
+  } else {
+    showResult(resultDiv, r, "Account created");
+  }
+});
 
 // FR-04: Load existing details to pre-fill the form
 document.getElementById("btn-fetch-details").addEventListener("click", async () => {
@@ -75,5 +121,6 @@ document.getElementById("close-account-form").addEventListener("submit", async (
   const r = await api("POST", `/api/accounts/${accNum}/close`);
   showResult(resultDiv, r, "Account closed successfully");
 });
+
 
 
