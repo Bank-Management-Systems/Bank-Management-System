@@ -5,21 +5,29 @@
    Contract: tests/integration/test_candidate1_account.py
    ========================================================================== */
 
-// Placeholder panel content until you build your screens.
-document.getElementById("panel-c1").innerHTML =
-  '<p class="muted">Owned by Candidate 1. Replace this panel with the ' +
-  'create / modify / close account screens.</p>';
+document.getElementById("panel-c1").innerHTML = `
+  <div class="card" style="margin-bottom: 12px;">
+    <h3>Close Account (FR-05)</h3>
+    <form id="close-account-form">
+      <input type="number" id="close-account-number" placeholder="Account Number" required>
+      <button type="submit" style="background: var(--bad);">Close Account</button>
+    </form>
+    <div id="close-result" style="margin-top: 8px;"></div>
+  </div>
+`;
 
-// TODO(Candidate 1): build the account-creation form.
-// Example call once your endpoint works:
-//
-// async function createAccount(form) {
-//   const r = await api("POST", "/api/accounts", {
-//     name: form.name.value,
-//     address: form.address.value,
-//     contact: form.contact.value,
-//     type: form.type.value,                 // "Savings" | "Current"
-//     opening_deposit: Number(form.deposit.value),
-//   });
-//   showResult(document.getElementById("panel-c1"), r, "Account created");
-// }
+document.getElementById("close-account-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const accNum = document.getElementById("close-account-number").value.trim();
+  if (!accNum) return;
+
+  const confirmed = confirm(`Are you sure you want to permanently close account #${accNum}? Closure is permitted only when balance is Rs. 0.`);
+  if (!confirmed) {
+    return;
+  }
+
+  const resultDiv = document.getElementById("close-result");
+  const r = await api("POST", `/api/accounts/${accNum}/close`);
+  showResult(resultDiv, r, "Account closed successfully");
+});
+

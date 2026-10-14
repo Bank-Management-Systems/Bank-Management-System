@@ -49,9 +49,47 @@ inline void register_account_routes(httplib::Server& svr) {
   // Success -> 200 {"account_number": <id>, "status": "closed"}
   // -------------------------------------------------------------------------
   svr.Post(R"(/api/accounts/(\d+)/close)", [](const httplib::Request& req, httplib::Response& res) {
-    // std::string id = req.matches[1];
-    // TODO(Candidate 1): implement  (UPDATE accounts SET status='closed', closed_at=NOW() ...)
-    http_utils::not_implemented(res, "FR-05 close account",
-                                "Candidate 1 (backend/candidate1_account/account_module.hpp)");
+    std::string id = req.matches[1];
+    Database& db = Database::instance();
+
+    std::string sql = "SELECT balance, status FROM accounts WHERE account_number = " + id;
+    MYSQL_RES* result = db.select(sql);
+    if (!result) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (!row) {
+      mysql_free_result(result);
+      http_utils::error_json(res, 404, "Unknown account");
+      return;
+    }
+
+    std::string status = row[1] ? row[1] : "";
+    if (status == "closed") {
+      mysql_free_result(result);
+      http_utils::error_json(res, 400, "Account is already closed");
+      return;
+    }
+
+    double balance = row[0] ? std::stod(row[0]) : 0.0;
+    mysql_free_result(result);
+
+    if (balance > 0.0 || balance < -0.001) {
+      http_utils::error_json(res, 400, "Account balance must be zero before closing");
+      return;
+    }
+
+    std::string update_sql = "UPDATE accounts SET status = 'closed', closed_at = NOW() WHERE account_number = " + id;
+    if (!db.exec(update_sql)) {
+      http_utils::error_json(res, 500, "Failed to close account");
+      return;
+    }
+
+    res.status = 200;
+    std::string json = "{\"account_number\": " + id + ", \"status\": \"closed\"}";
+    res.set_content(json, "application/json");
   });
 }
+
