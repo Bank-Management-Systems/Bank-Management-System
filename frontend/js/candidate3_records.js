@@ -8,6 +8,15 @@
 
 document.getElementById("panel-c3").innerHTML = `
   <div class="card" style="margin-bottom: 14px;">
+    <h3>Transaction History (FR-15)</h3>
+    <form id="history-form">
+      <input type="number" id="history-account-number" placeholder="Account Number" required>
+      <button type="submit">View History</button>
+    </form>
+    <div id="history-result" style="margin-top: 10px;"></div>
+  </div>
+
+  <div class="card" style="margin-bottom: 14px;">
     <h3>Account Statement (FR-17)</h3>
     <form id="statement-form">
       <input type="number" id="statement-account-number" placeholder="Account Number" required>
@@ -29,6 +38,55 @@ document.getElementById("panel-c3").innerHTML = `
     <div id="statement-result" style="margin-top: 10px;"></div>
   </div>
 `;
+
+// FR-15: View transaction history
+document.getElementById("history-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const accNum = document.getElementById("history-account-number").value.trim();
+  const resultDiv = document.getElementById("history-result");
+
+  const r = await api("GET", `/api/accounts/${accNum}/transactions`);
+  if (r.status === 200 && r.data) {
+    const d = r.data;
+    if (!d.transactions || d.transactions.length === 0) {
+      resultDiv.innerHTML = '<div class="muted" style="padding: 10px; background: #f8fafc; border-radius: 6px; text-align: center;">No transactions found for this account.</div>';
+      return;
+    }
+
+    const rows = d.transactions.map(t => {
+      const isCredit = t.type === "DEPOSIT" || t.type === "TRANSFER_IN";
+      const badgeColor = isCredit ? "var(--ok)" : "var(--bad)";
+      const sign = isCredit ? "+" : "-";
+      return `
+        <tr>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee;">${escapeHtml(t.created_at || "")}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee;"><span style="color: ${badgeColor}; font-weight: 600;">${escapeHtml(t.type || "")}</span></td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee; text-align: right; color: ${badgeColor}; font-weight: 600;">${sign}Rs. ${Number(t.amount).toFixed(2)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee; text-align: right;">Rs. ${Number(t.balance_after).toFixed(2)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    resultDiv.innerHTML = `
+      <div style="font-size: 0.9em; margin-bottom: 6px;">Total Transactions: <strong>${d.count || d.transactions.length}</strong></div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+        <thead>
+          <tr style="background: #eef2f6; text-align: left;">
+            <th style="padding: 6px 8px;">Date</th>
+            <th style="padding: 6px 8px;">Type</th>
+            <th style="padding: 6px 8px; text-align: right;">Amount</th>
+            <th style="padding: 6px 8px; text-align: right;">Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    `;
+  } else {
+    showResult(resultDiv, r, "History");
+  }
+});
 
 // FR-17: Generate account statement
 document.getElementById("statement-form").addEventListener("submit", async (e) => {
@@ -98,4 +156,5 @@ document.getElementById("statement-form").addEventListener("submit", async (e) =
 document.getElementById("btn-print-statement").addEventListener("click", () => {
   window.print();
 });
+
 

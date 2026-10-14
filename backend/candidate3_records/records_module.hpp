@@ -35,9 +35,73 @@ inline void register_record_routes(httplib::Server& svr) {
   //                 "transactions": [ {"type":..., "amount":..., "created_at":...}, ... ]}
   // -------------------------------------------------------------------------
   svr.Get(R"(/api/accounts/(\d+)/transactions)", [](const httplib::Request& req, httplib::Response& res) {
-    // TODO(Candidate 3): implement (SELECT ... FROM transactions WHERE account_number = id ORDER BY created_at)
-    http_utils::not_implemented(res, "FR-15 transaction history",
-                                "Candidate 3 (backend/candidate3_records/records_module.hpp)");
+    std::string id = req.matches[1];
+    Database& db = Database::instance();
+
+    std::string acc_sql = "SELECT account_number FROM accounts WHERE account_number = " + id;
+    MYSQL_RES* acc_res = db.select(acc_sql);
+    if (!acc_res) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    MYSQL_ROW acc_row = mysql_fetch_row(acc_res);
+    if (!acc_row) {
+      mysql_free_result(acc_res);
+      http_utils::error_json(res, 404, "Unknown account");
+      return;
+    }
+    mysql_free_result(acc_res);
+
+    std::string sql = "SELECT id, type, amount, balance_after, related_account, created_at "
+                      "FROM transactions WHERE account_number = " + id +
+                      " ORDER BY created_at ASC, id ASC";
+
+    MYSQL_RES* tx_res = db.select(sql);
+    if (!tx_res) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    auto format_money = [](double val) {
+      char buf[64];
+      snprintf(buf, sizeof(buf), "%.2f", val);
+      return std::string(buf);
+    };
+
+    std::string tx_json = "[";
+    MYSQL_ROW row;
+    bool first = true;
+    size_t count = 0;
+
+    while ((row = mysql_fetch_row(tx_res))) {
+      std::string tx_id = row[0] ? row[0] : "0";
+      std::string type = row[1] ? row[1] : "";
+      double amount = row[2] ? std::stod(row[2]) : 0.0;
+      std::string balance_after = row[3] ? row[3] : "0.00";
+      std::string related = row[4] ? row[4] : "null";
+      std::string created_at = row[5] ? row[5] : "";
+
+      if (!first) tx_json += ",";
+      first = false;
+
+      tx_json += "{\"id\":" + tx_id +
+                 ",\"type\":\"" + type + "\"" +
+                 ",\"amount\":" + format_money(amount) +
+                 ",\"balance_after\":" + balance_after +
+                 ",\"related_account\":" + (related == "null" ? "null" : related) +
+                 ",\"created_at\":\"" + created_at + "\"}";
+      count++;
+    }
+    tx_json += "]";
+    mysql_free_result(tx_res);
+
+    std::string json = "{\"account_number\":" + id +
+                       ",\"count\":" + std::to_string(count) +
+                       ",\"transactions\":" + tx_json + "}";
+
+    res.status = 200;
+    res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------
