@@ -31,15 +31,107 @@ inline void register_account_routes(httplib::Server& svr) {
   });
 
   // -------------------------------------------------------------------------
+  // GET /api/accounts/(\d+)  -  get account details (pre-filling edit forms)
+  // -------------------------------------------------------------------------
+  svr.Get(R"(/api/accounts/(\d+))", [](const httplib::Request& req, httplib::Response& res) {
+    std::string id = req.matches[1];
+    Database& db = Database::instance();
+
+    std::string sql = "SELECT account_number, name, address, contact, type, balance, status FROM accounts WHERE account_number = " + id;
+    MYSQL_RES* result = db.select(sql);
+    if (!result) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (!row) {
+      mysql_free_result(result);
+      http_utils::error_json(res, 404, "Unknown account");
+      return;
+    }
+
+    std::string name = row[1] ? row[1] : "";
+    std::string address = row[2] ? row[2] : "";
+    std::string contact = row[3] ? row[3] : "";
+    std::string type = row[4] ? row[4] : "";
+    std::string balance = row[5] ? row[5] : "0.00";
+    std::string status = row[6] ? row[6] : "";
+    mysql_free_result(result);
+
+    std::string json = "{\"account_number\": " + id +
+                       ", \"name\": \"" + name +
+                       "\", \"address\": \"" + address +
+                       "\", \"contact\": \"" + contact +
+                       "\", \"type\": \"" + type +
+                       "\", \"balance\": " + balance +
+                       ", \"status\": \"" + status + "\"}";
+    res.set_content(json, "application/json");
+  });
+
+  // -------------------------------------------------------------------------
   // FR-04  PUT /api/accounts/(\d+)  -  modify editable customer details
   // Editable: address, contact (NOT name/balance). Unknown id -> 404.
   // Success -> 200 {"account_number": <id>, "address": ..., "contact": ...}
   // -------------------------------------------------------------------------
   svr.Put(R"(/api/accounts/(\d+))", [](const httplib::Request& req, httplib::Response& res) {
-    // std::string id = req.matches[1];  // captured account number
-    // TODO(Candidate 1): implement  (UPDATE accounts SET ... WHERE account_number = id)
-    http_utils::not_implemented(res, "FR-04 modify customer details",
-                                "Candidate 1 (backend/candidate1_account/account_module.hpp)");
+    std::string id = req.matches[1];
+    Database& db = Database::instance();
+
+    std::string sql = "SELECT address, contact, status FROM accounts WHERE account_number = " + id;
+    MYSQL_RES* result = db.select(sql);
+    if (!result) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (!row) {
+      mysql_free_result(result);
+      http_utils::error_json(res, 404, "Unknown account");
+      return;
+    }
+
+    std::string cur_address = row[0] ? row[0] : "";
+    std::string cur_contact = row[1] ? row[1] : "";
+    std::string status = row[2] ? row[2] : "";
+    mysql_free_result(result);
+
+    if (status == "closed") {
+      http_utils::error_json(res, 400, "Cannot modify closed account");
+      return;
+    }
+
+    std::string new_address = http_utils::trim(http_utils::get_string(req.body, "address"));
+    std::string new_contact = http_utils::trim(http_utils::get_string(req.body, "contact"));
+
+    std::string final_address = new_address.empty() ? cur_address : new_address;
+    std::string final_contact = new_contact.empty() ? cur_contact : new_contact;
+
+    auto sql_escape = [](const std::string& s) {
+      std::string out;
+      for (char c : s) {
+        if (c == '\'') out += "''";
+        else if (c == '\\') out += "\\\\";
+        else out += c;
+      }
+      return out;
+    };
+
+    std::string update_sql = "UPDATE accounts SET address = '" + sql_escape(final_address) +
+                             "', contact = '" + sql_escape(final_contact) +
+                             "' WHERE account_number = " + id;
+
+    if (!db.exec(update_sql)) {
+      http_utils::error_json(res, 500, "Failed to update account details");
+      return;
+    }
+
+    res.status = 200;
+    std::string json = "{\"account_number\": " + id +
+                       ", \"address\": \"" + final_address +
+                       "\", \"contact\": \"" + final_contact + "\"}";
+    res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------
