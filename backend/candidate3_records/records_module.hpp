@@ -22,9 +22,123 @@ inline void register_record_routes(httplib::Server& svr) {
   // Failure -> 400 (insufficient funds / unknown or closed account / amount<=0)
   // -------------------------------------------------------------------------
   svr.Post("/api/transfers", [](const httplib::Request& req, httplib::Response& res) {
-    // TODO(Candidate 3): implement with an explicit SQL transaction
-    http_utils::not_implemented(res, "FR-13 transfer",
-                                "Candidate 3 (backend/candidate3_records/records_module.hpp)");
+    long from_acc = http_utils::get_number(req.body, "from_account", 0);
+    long to_acc = http_utils::get_number(req.body, "to_account", 0);
+    long amount = http_utils::get_number(req.body, "amount", 0);
+
+    if (amount <= 0) {
+      http_utils::error_json(res, 400, "Transfer amount must be greater than zero");
+      return;
+    }
+
+    if (from_acc <= 0 || to_acc <= 0) {
+      http_utils::error_json(res, 400, "Invalid account number");
+      return;
+    }
+
+    if (from_acc == to_acc) {
+      http_utils::error_json(res, 400, "Cannot transfer to the same account");
+      return;
+    }
+
+    Database& db = Database::instance();
+    db.exec("START TRANSACTION");
+
+    // Query both accounts in ordered sequence to prevent deadlock
+    std::string first_id = std::to_string(std::min(from_acc, to_acc));
+    std::string second_id = std::to_string(std::max(from_acc, to_acc));
+    std::string lock_sql = "SELECT account_number, balance, status FROM accounts "
+                           "WHERE account_number IN (" + first_id + ", " + second_id + ") FOR UPDATE";
+
+    MYSQL_RES* lock_res = db.select(lock_sql);
+    if (!lock_res) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    double from_balance = 0.0, to_balance = 0.0;
+    std::string from_status = "", to_status = "";
+    bool from_found = false, to_found = false;
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(lock_res))) {
+      long acc_no = row[0] ? std::stol(row[0]) : 0;
+      double bal = row[1] ? std::stod(row[1]) : 0.0;
+      std::string stat = row[2] ? row[2] : "";
+
+      if (acc_no == from_acc) {
+        from_found = true;
+        from_balance = bal;
+        from_status = stat;
+      } else if (acc_no == to_acc) {
+        to_found = true;
+        to_balance = bal;
+        to_status = stat;
+      }
+    }
+    mysql_free_result(lock_res);
+
+    if (!from_found || !to_found) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 404, "Unknown account: source or destination account does not exist");
+      return;
+    }
+
+    if (from_status == "closed" || to_status == "closed") {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 400, "Cannot transfer: account is closed");
+      return;
+    }
+
+    if (from_balance - amount < 500.0) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 400, "Insufficient funds: sender must maintain minimum balance of Rs. 500");
+      return;
+    }
+
+    double new_from = from_balance - amount;
+    double new_to = to_balance + amount;
+
+    std::string debit_sql = "UPDATE accounts SET balance = balance - " + std::to_string(amount) +
+                            " WHERE account_number = " + std::to_string(from_acc);
+    std::string credit_sql = "UPDATE accounts SET balance = balance + " + std::to_string(amount) +
+                             " WHERE account_number = " + std::to_string(to_acc);
+
+    if (!db.exec(debit_sql) || !db.exec(credit_sql)) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 500, "Failed to update balances");
+      return;
+    }
+
+    char buf_from[64], buf_to[64], buf_amt[64];
+    snprintf(buf_from, sizeof(buf_from), "%.2f", new_from);
+    snprintf(buf_to, sizeof(buf_to), "%.2f", new_to);
+    snprintf(buf_amt, sizeof(buf_amt), "%.2f", static_cast<double>(amount));
+
+    std::string out_sql = "INSERT INTO transactions (account_number, type, amount, balance_after, related_account) VALUES (" +
+                          std::to_string(from_acc) + ", 'TRANSFER_OUT', " + std::to_string(amount) + ", " +
+                          std::string(buf_from) + ", " + std::to_string(to_acc) + ")";
+    std::string in_sql = "INSERT INTO transactions (account_number, type, amount, balance_after, related_account) VALUES (" +
+                         std::to_string(to_acc) + ", 'TRANSFER_IN', " + std::to_string(amount) + ", " +
+                         std::string(buf_to) + ", " + std::to_string(from_acc) + ")";
+
+    if (!db.exec(out_sql) || !db.exec(in_sql)) {
+      db.exec("ROLLBACK");
+      http_utils::error_json(res, 500, "Failed to record transaction log");
+      return;
+    }
+
+    db.exec("COMMIT");
+
+    std::string json = "{\"from_account\":" + std::to_string(from_acc) +
+                       ",\"to_account\":" + std::to_string(to_acc) +
+                       ",\"amount\":" + std::string(buf_amt) +
+                       ",\"from_balance\":" + std::string(buf_from) +
+                       ",\"to_balance\":" + std::string(buf_to) + "}";
+
+    res.status = 200;
+    res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------
@@ -35,9 +149,73 @@ inline void register_record_routes(httplib::Server& svr) {
   //                 "transactions": [ {"type":..., "amount":..., "created_at":...}, ... ]}
   // -------------------------------------------------------------------------
   svr.Get(R"(/api/accounts/(\d+)/transactions)", [](const httplib::Request& req, httplib::Response& res) {
-    // TODO(Candidate 3): implement (SELECT ... FROM transactions WHERE account_number = id ORDER BY created_at)
-    http_utils::not_implemented(res, "FR-15 transaction history",
-                                "Candidate 3 (backend/candidate3_records/records_module.hpp)");
+    std::string id = req.matches[1];
+    Database& db = Database::instance();
+
+    std::string acc_sql = "SELECT account_number FROM accounts WHERE account_number = " + id;
+    MYSQL_RES* acc_res = db.select(acc_sql);
+    if (!acc_res) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    MYSQL_ROW acc_row = mysql_fetch_row(acc_res);
+    if (!acc_row) {
+      mysql_free_result(acc_res);
+      http_utils::error_json(res, 404, "Unknown account");
+      return;
+    }
+    mysql_free_result(acc_res);
+
+    std::string sql = "SELECT id, type, amount, balance_after, related_account, created_at "
+                      "FROM transactions WHERE account_number = " + id +
+                      " ORDER BY created_at ASC, id ASC";
+
+    MYSQL_RES* tx_res = db.select(sql);
+    if (!tx_res) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    auto format_money = [](double val) {
+      char buf[64];
+      snprintf(buf, sizeof(buf), "%.2f", val);
+      return std::string(buf);
+    };
+
+    std::string tx_json = "[";
+    MYSQL_ROW row;
+    bool first = true;
+    size_t count = 0;
+
+    while ((row = mysql_fetch_row(tx_res))) {
+      std::string tx_id = row[0] ? row[0] : "0";
+      std::string type = row[1] ? row[1] : "";
+      double amount = row[2] ? std::stod(row[2]) : 0.0;
+      std::string balance_after = row[3] ? row[3] : "0.00";
+      std::string related = row[4] ? row[4] : "null";
+      std::string created_at = row[5] ? row[5] : "";
+
+      if (!first) tx_json += ",";
+      first = false;
+
+      tx_json += "{\"id\":" + tx_id +
+                 ",\"type\":\"" + type + "\"" +
+                 ",\"amount\":" + format_money(amount) +
+                 ",\"balance_after\":" + balance_after +
+                 ",\"related_account\":" + (related == "null" ? "null" : related) +
+                 ",\"created_at\":\"" + created_at + "\"}";
+      count++;
+    }
+    tx_json += "]";
+    mysql_free_result(tx_res);
+
+    std::string json = "{\"account_number\":" + id +
+                       ",\"count\":" + std::to_string(count) +
+                       ",\"transactions\":" + tx_json + "}";
+
+    res.status = 200;
+    res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------
@@ -48,8 +226,127 @@ inline void register_record_routes(httplib::Server& svr) {
   //                 "opening_balance":..., "closing_balance":..., "transactions":[...]}
   // -------------------------------------------------------------------------
   svr.Get(R"(/api/accounts/(\d+)/statement)", [](const httplib::Request& req, httplib::Response& res) {
-    // TODO(Candidate 3): implement
-    http_utils::not_implemented(res, "FR-17 statement",
-                                "Candidate 3 (backend/candidate3_records/records_module.hpp)");
+    std::string id = req.matches[1];
+    Database& db = Database::instance();
+
+    std::string acc_sql = "SELECT balance FROM accounts WHERE account_number = " + id;
+    MYSQL_RES* acc_res = db.select(acc_sql);
+    if (!acc_res) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    MYSQL_ROW acc_row = mysql_fetch_row(acc_res);
+    if (!acc_row) {
+      mysql_free_result(acc_res);
+      http_utils::error_json(res, 404, "Unknown account");
+      return;
+    }
+
+    double current_balance = acc_row[0] ? std::stod(acc_row[0]) : 0.0;
+    mysql_free_result(acc_res);
+
+    std::string from_date = req.has_param("from") ? http_utils::trim(req.get_param_value("from")) : "";
+    std::string to_date = req.has_param("to") ? http_utils::trim(req.get_param_value("to")) : "";
+
+    // If to_date is provided, calculate any future net change after to_date to determine closing balance at to_date
+    double future_net_change = 0.0;
+    if (!to_date.empty()) {
+      std::string to_clause = (to_date.find(' ') != std::string::npos) ? to_date : (to_date + " 23:59:59");
+      std::string future_sql = "SELECT type, amount FROM transactions WHERE account_number = " + id +
+                               " AND created_at > '" + to_clause + "'";
+      MYSQL_RES* future_res = db.select(future_sql);
+      if (future_res) {
+        MYSQL_ROW f_row;
+        while ((f_row = mysql_fetch_row(future_res))) {
+          std::string f_type = f_row[0] ? f_row[0] : "";
+          double f_amt = f_row[1] ? std::stod(f_row[1]) : 0.0;
+          if (f_type == "DEPOSIT" || f_type == "TRANSFER_IN") {
+            future_net_change += f_amt;
+          } else if (f_type == "WITHDRAWAL" || f_type == "TRANSFER_OUT") {
+            future_net_change -= f_amt;
+          }
+        }
+        mysql_free_result(future_res);
+      }
+    }
+
+    double statement_closing_balance = current_balance - future_net_change;
+
+    // Fetch transactions in range
+    std::string tx_sql = "SELECT id, type, amount, balance_after, related_account, created_at "
+                         "FROM transactions WHERE account_number = " + id;
+    if (!from_date.empty()) {
+      std::string from_clause = (from_date.find(' ') != std::string::npos) ? from_date : (from_date + " 00:00:00");
+      tx_sql += " AND created_at >= '" + from_clause + "'";
+    }
+    if (!to_date.empty()) {
+      std::string to_clause = (to_date.find(' ') != std::string::npos) ? to_date : (to_date + " 23:59:59");
+      tx_sql += " AND created_at <= '" + to_clause + "'";
+    }
+    tx_sql += " ORDER BY created_at ASC, id ASC";
+
+    MYSQL_RES* tx_res = db.select(tx_sql);
+    if (!tx_res) {
+      http_utils::error_json(res, 500, "Database error");
+      return;
+    }
+
+    auto format_money = [](double val) {
+      char buf[64];
+      snprintf(buf, sizeof(buf), "%.2f", val);
+      return std::string(buf);
+    };
+
+    std::string tx_json = "[";
+    MYSQL_ROW row;
+    bool first = true;
+    double range_net_change = 0.0;
+    size_t count = 0;
+
+    while ((row = mysql_fetch_row(tx_res))) {
+      std::string tx_id = row[0] ? row[0] : "0";
+      std::string type = row[1] ? row[1] : "";
+      double amount = row[2] ? std::stod(row[2]) : 0.0;
+      std::string balance_after = row[3] ? row[3] : "0.00";
+      std::string related = row[4] ? row[4] : "null";
+      std::string created_at = row[5] ? row[5] : "";
+
+      if (type == "DEPOSIT" || type == "TRANSFER_IN") {
+        range_net_change += amount;
+      } else if (type == "WITHDRAWAL" || type == "TRANSFER_OUT") {
+        range_net_change -= amount;
+      }
+
+      if (!first) tx_json += ",";
+      first = false;
+
+      tx_json += "{\"id\":" + tx_id +
+                 ",\"type\":\"" + type + "\"" +
+                 ",\"amount\":" + format_money(amount) +
+                 ",\"balance_after\":" + balance_after +
+                 ",\"related_account\":" + (related == "null" ? "null" : related) +
+                 ",\"created_at\":\"" + created_at + "\"}";
+      count++;
+    }
+    tx_json += "]";
+    mysql_free_result(tx_res);
+
+    double statement_opening_balance = statement_closing_balance - range_net_change;
+
+    std::string from_val = from_date.empty() ? "null" : ("\"" + from_date + "\"");
+    std::string to_val = to_date.empty() ? "null" : ("\"" + to_date + "\"");
+
+    std::string json = "{\"account_number\":" + id +
+                       ",\"from\":" + from_val +
+                       ",\"to\":" + to_val +
+                       ",\"opening_balance\":" + format_money(statement_opening_balance) +
+                       ",\"closing_balance\":" + format_money(statement_closing_balance) +
+                       ",\"count\":" + std::to_string(count) +
+                       ",\"transactions\":" + tx_json + "}";
+
+    res.status = 200;
+    res.set_content(json, "application/json");
   });
 }
+
