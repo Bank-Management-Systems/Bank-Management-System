@@ -3,39 +3,68 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Login · Bank Management System</title>
+  <title>Login · Apex Bank Management System</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🏦 Bank Management System</div>
-    <nav><a href="index.html">Dashboard</a></nav>
+    <div class="brand">
+      <span>🏦</span>
+      <span><span class="gold">Apex</span> Bank Management System</span>
+    </div>
+    <div class="topbar-right">
+      <nav><a href="index.html">← Back to Portal</a></nav>
+    </div>
   </header>
 
-  <main class="container narrow">
-    <h1>Login</h1>
-    <!-- Owned by CANDIDATE 4 (FR-18 staff login / FR-19 customer login).
-         Wire these forms to the endpoints in backend/candidate4_security/. -->
-    <section class="card">
-      <h2>Staff (Admin)</h2>
+  <main class="container narrow" style="margin-top: 24px;">
+    <div class="card" style="border-top: 4px solid var(--gold); padding: 28px 24px; margin-bottom: 24px;">
+      <h2>👔 Staff & Admin Access</h2>
+      <p class="muted" style="margin-bottom: 8px;">Authorized personnel terminal.</p>
+      <div class="chips-row">
+        <span class="chip" onclick="document.getElementById('staff-user').value='admin';document.getElementById('staff-pass').value='admin123';">👑 Fill Admin</span>
+        <span class="chip" onclick="document.getElementById('staff-user').value='teller_sarah';document.getElementById('staff-pass').value='sarah123';">👔 Fill Staff</span>
+      </div>
       <form id="staff-form">
-        <label>Username <input type="text" id="staff-user" placeholder="admin" required /></label>
-        <label>Password <input type="password" id="staff-pass" required /></label>
-        <button type="submit">Sign in as staff</button>
+        <label>
+          Username / Staff ID
+          <input type="text" id="staff-user" placeholder="admin" value="admin" required />
+        </label>
+        <label>
+          Password
+          <input type="password" id="staff-pass" placeholder="••••••••" required />
+        </label>
+        <button type="submit" class="btn-gold" style="margin-top: 6px;">Sign in as staff &rarr;</button>
       </form>
-      <p id="staff-msg" class="muted"></p>
-    </section>
+      <p id="staff-msg" class="muted" style="margin-top: 10px;"></p>
+    </div>
 
-    <section class="card">
-      <h2>Customer (self-service)</h2>
+    <div class="card" style="border-top: 4px solid #60a5fa; padding: 28px 24px;">
+      <h2>👤 Customer Self-Service</h2>
+      <p class="muted" style="margin-bottom: 8px;">Personal account access.</p>
+      <div class="chips-row">
+        <span class="chip" onclick="document.getElementById('cust-acc').value='1001';document.getElementById('cust-pin').value='1234';">👤 Fill Acc 1001</span>
+        <span class="chip" onclick="document.getElementById('cust-acc').value='1002';document.getElementById('cust-pin').value='1234';">👤 Fill Acc 1002</span>
+      </div>
       <form id="customer-form">
-        <label>Account number <input type="number" id="cust-acc" placeholder="1001" required /></label>
-        <label>PIN <input type="password" id="cust-pin" maxlength="6" required /></label>
-        <button type="submit">Sign in as customer</button>
+        <label>
+          Account Number
+          <input type="number" id="cust-acc" placeholder="1001" value="1001" required />
+        </label>
+        <label>
+          Security PIN
+          <input type="password" id="cust-pin" placeholder="••••" maxlength="6" required />
+        </label>
+        <button type="submit" style="margin-top: 6px;">Sign in as customer &rarr;</button>
       </form>
-      <p id="cust-msg" class="muted"></p>
-    </section>
+      <p id="cust-msg" class="muted" style="margin-top: 10px;"></p>
+    </div>
   </main>
+
+  <footer class="footer">
+    <span>Apex Bank Management System · Enterprise Edition</span>
+    <span id="api-status">API: checking…</span>
+  </footer>
 
   <script src="js/app.js"></script>
   <script src="js/candidate4_security.js"></script>

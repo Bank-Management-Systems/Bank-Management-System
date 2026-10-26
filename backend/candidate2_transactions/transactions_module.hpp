@@ -11,19 +11,28 @@
 #include "../common/http_utils.hpp"
 #include "../common/db.hpp"
 
+inline double get_transaction_amount(const std::string& body, const std::string& key) {
+  std::string pat = "\"" + key + "\"";
+  size_t p = body.find(pat);
+  if (p == std::string::npos) return 0.0;
+  p = body.find(':', p + pat.size());
+  if (p == std::string::npos) return 0.0;
+  return std::strtod(http_utils::trim(body.substr(p + 1)).c_str(), nullptr);
+}
+
 inline void register_transaction_routes(httplib::Server& svr) {
 
   // -------------------------------------------------------------------------
   // FR-08  POST /api/accounts/(\d+)/deposit   body: {"amount": 1000}
   // Success -> 200 {"account_number": <id>, "balance": <new_balance>}
-  // Failure -> 400 (amount <= 0 / non-numeric / account closed or unknown)
+  // Failure -> 400 (amount <= 0 / non-numeric / account closed), 404 unknown account
   // Also: write a row into transactions (type 'DEPOSIT') - see database/schema.sql
   // -------------------------------------------------------------------------
   svr.Post(R"(/api/accounts/(\d+)/deposit)", [](const httplib::Request& req, httplib::Response& res) {
     std::string id = req.matches[1];
-    long amount = http_utils::get_number(req.body, "amount", 0);
+    double amount = get_transaction_amount(req.body, "amount");
     
-    if (amount <= 0) {
+    if (amount <= 0.0) {
       http_utils::error_json(res, 400, "Deposit amount must be greater than zero");
       return;
     }
@@ -60,8 +69,11 @@ inline void register_transaction_routes(httplib::Server& svr) {
     mysql_free_result(result);
     
     double new_balance = balance + amount;
+    char amt_buf[64], bal_buf[64];
+    snprintf(amt_buf, sizeof(amt_buf), "%.2f", amount);
+    snprintf(bal_buf, sizeof(bal_buf), "%.2f", new_balance);
     
-    std::string update_sql = "UPDATE accounts SET balance = balance + " + std::to_string(amount) + 
+    std::string update_sql = "UPDATE accounts SET balance = balance + " + std::string(amt_buf) + 
                              " WHERE account_number = " + id;
     if (!db.exec(update_sql)) {
       db.exec("ROLLBACK");
@@ -70,7 +82,7 @@ inline void register_transaction_routes(httplib::Server& svr) {
     }
     
     std::string insert_sql = "INSERT INTO transactions (account_number, type, amount, balance_after) VALUES (" +
-                             id + ", 'DEPOSIT', " + std::to_string(amount) + ", " + std::to_string(new_balance) + ")";
+                             id + ", 'DEPOSIT', " + std::string(amt_buf) + ", " + std::string(bal_buf) + ")";
     if (!db.exec(insert_sql)) {
       db.exec("ROLLBACK");
       http_utils::error_json(res, 500, "Failed to record transaction");
@@ -79,23 +91,21 @@ inline void register_transaction_routes(httplib::Server& svr) {
     
     db.exec("COMMIT");
     
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer), "%.2f", new_balance);
-    std::string json = "{\"account_number\": " + id + ", \"balance\": " + std::string(buffer) + "}";
+    std::string json = "{\"account_number\": " + id + ", \"balance\": " + std::string(bal_buf) + "}";
     res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------
   // FR-09  POST /api/accounts/(\d+)/withdraw  body: {"amount": 500}
   // Rules: amount > 0 AND (balance - amount) >= 500 minimum balance.
-  // Success -> 200 with new balance | Failure -> 400 with clear message
+  // Success -> 200 with new balance | Failure -> 400 with clear message | 404 unknown account
   // Also: write a row into transactions (type 'WITHDRAWAL')
   // -------------------------------------------------------------------------
   svr.Post(R"(/api/accounts/(\d+)/withdraw)", [](const httplib::Request& req, httplib::Response& res) {
     std::string id = req.matches[1];
-    long amount = http_utils::get_number(req.body, "amount", 0);
+    double amount = get_transaction_amount(req.body, "amount");
     
-    if (amount <= 0) {
+    if (amount <= 0.0) {
       http_utils::error_json(res, 400, "Withdrawal amount must be greater than zero");
       return;
     }
@@ -116,7 +126,7 @@ inline void register_transaction_routes(httplib::Server& svr) {
     if (!row) {
       mysql_free_result(result);
       db.exec("ROLLBACK");
-      http_utils::error_json(res, 400, "Unknown account");
+      http_utils::error_json(res, 404, "Unknown account");
       return;
     }
     
@@ -138,8 +148,11 @@ inline void register_transaction_routes(httplib::Server& svr) {
     }
     
     double new_balance = balance - amount;
+    char amt_buf[64], bal_buf[64];
+    snprintf(amt_buf, sizeof(amt_buf), "%.2f", amount);
+    snprintf(bal_buf, sizeof(bal_buf), "%.2f", new_balance);
     
-    std::string update_sql = "UPDATE accounts SET balance = balance - " + std::to_string(amount) + 
+    std::string update_sql = "UPDATE accounts SET balance = balance - " + std::string(amt_buf) + 
                              " WHERE account_number = " + id;
     if (!db.exec(update_sql)) {
       db.exec("ROLLBACK");
@@ -148,7 +161,7 @@ inline void register_transaction_routes(httplib::Server& svr) {
     }
     
     std::string insert_sql = "INSERT INTO transactions (account_number, type, amount, balance_after) VALUES (" +
-                             id + ", 'WITHDRAWAL', " + std::to_string(amount) + ", " + std::to_string(new_balance) + ")";
+                             id + ", 'WITHDRAWAL', " + std::string(amt_buf) + ", " + std::string(bal_buf) + ")";
     if (!db.exec(insert_sql)) {
       db.exec("ROLLBACK");
       http_utils::error_json(res, 500, "Failed to record transaction");
@@ -157,9 +170,7 @@ inline void register_transaction_routes(httplib::Server& svr) {
     
     db.exec("COMMIT");
     
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer), "%.2f", new_balance);
-    std::string json = "{\"account_number\": " + id + ", \"balance\": " + std::string(buffer) + "}";
+    std::string json = "{\"account_number\": " + id + ", \"balance\": " + std::string(bal_buf) + "}";
     res.set_content(json, "application/json");
   });
 
