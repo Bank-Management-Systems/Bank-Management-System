@@ -23,3 +23,12 @@
 - Withdrawal must leave at least the Rs. 500 minimum balance - FR-09.
 - Every accepted operation writes a row into `transactions` (Candidate 3 reads it).
 - Closed accounts (status='closed', set by Candidate 1) reject every operation.
+
+## Performance & Latency Budget (NFR-01)
+- **Target latency**: Well under 1.0 s per interactive request under normal load (typically < 100 ms).
+- **Hard latency limit**: 2.0 s maximum per V1 requirements.
+- **Hot-path efficiency**:
+  - Deposit, withdrawal, and balance inquiry perform indexed primary-key lookups on `accounts(account_number)` (`O(1)`).
+  - Transaction rows append directly without full-table scans.
+  - History and statement queries are accelerated by the additive index `idx_txn_account_created ON transactions(account_number, created_at)`.
+

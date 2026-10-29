@@ -3,6 +3,13 @@
 // Scope     : FR-08 Deposit | FR-09 Withdrawal | FR-12 Balance inquiry
 // Reference : docs/Bank_Management_System_Test_Plan_V2.docx  -> Chapter 5 (5.1 - 5.3)
 // Tests     : tests/integration/test_candidate2_transactions.py
+// Performance (NFR-01):
+//   Interactive endpoint SLA / latency budget:
+//     - Target latency: well under 1.0 s under normal load (typically < 100 ms)
+//     - Hard latency limit: 2.0 s per V1
+//     - Zero per-request overhead on the hot path: indexed primary-key lookups on
+//       accounts(account_number) avoid full-table scans. Transactions table inserts
+//       append directly and queries use idx_txn_account_created(account_number, created_at).
 // Notes     : business rules: amount > 0; withdrawal must leave balance >= 500
 //             (minimum balance); closed accounts reject every operation (400).
 // ============================================================================
@@ -10,6 +17,12 @@
 #include "httplib.h"
 #include "../common/http_utils.hpp"
 #include "../common/db.hpp"
+
+namespace candidate2 {
+// NFR-01 Performance Latency Budgets (seconds)
+constexpr double TARGET_LATENCY_BUDGET_SECONDS = 1.0;     // Target well under 1 s
+constexpr double HARD_LIMIT_LATENCY_BUDGET_SECONDS = 2.0; // Hard limit per V1
+}  // namespace candidate2
 
 inline double get_transaction_amount(const std::string& body, const std::string& key) {
   std::string pat = "\"" + key + "\"";
