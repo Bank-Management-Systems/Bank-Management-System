@@ -104,6 +104,97 @@ def test_fr09_withdraw_breaking_minimum_balance_rejected():
     assert r.status_code == 400, "withdrawal leaving less than Rs. 500 must be rejected"
 
 
+def test_fr10_withdraw_boundary_exact_500_succeeds_and_499_99_rejected():
+    """FR-10: Exact boundary check.
+    
+    Leaving Rs. 499.99 remaining must be rejected with 400 (naming minimum balance).
+    Leaving exactly Rs. 500.00 remaining must succeed with 200.
+    """
+    acc, _ = make_account()
+
+    # Get current balance
+    r_bal = call("GET", f"/api/accounts/{acc}/balance")
+    skip_if_unimplemented(r_bal, C2)
+    assert r_bal.status_code == 200
+    start_bal = float(r_bal.json()["balance"])
+    assert start_bal >= 500.0
+
+    # 1. Attempt to withdraw leaving Rs. 499.99 remaining -> MUST BE REJECTED (400)
+    withdraw_leaving_499_99 = round(start_bal - 499.99, 2)
+    r_reject = call("POST", f"/api/accounts/{acc}/withdraw", {"amount": withdraw_leaving_499_99})
+    skip_if_unimplemented(r_reject, C2)
+    assert r_reject.status_code == 400, (
+        f"Withdrawal leaving Rs. 499.99 must return 400, got {r_reject.status_code}: {r_reject.text}"
+    )
+    err = r_reject.json().get("error", "").lower()
+    assert "minimum balance" in err or "500" in err, f"Error message must name minimum balance, got: {err}"
+
+    # Balance must remain completely unchanged
+    r_chk1 = call("GET", f"/api/accounts/{acc}/balance")
+    assert float(r_chk1.json()["balance"]) == start_bal, "Balance changed after rejected boundary withdrawal"
+
+    # 2. Attempt to withdraw leaving exactly Rs. 500.00 remaining -> MUST SUCCEED (200)
+    withdraw_leaving_500 = round(start_bal - 500.00, 2)
+    r_ok = call("POST", f"/api/accounts/{acc}/withdraw", {"amount": withdraw_leaving_500})
+    skip_if_unimplemented(r_ok, C2)
+    assert r_ok.status_code == 200, (
+        f"Withdrawal leaving exactly Rs. 500 must return 200, got {r_ok.status_code}: {r_ok.text}"
+    )
+    assert float(r_ok.json()["balance"]) == 500.00, f"Expected new balance 500.00, got {r_ok.json()['balance']}"
+
+    # Confirm via balance inquiry
+    r_chk2 = call("GET", f"/api/accounts/{acc}/balance")
+    assert float(r_chk2.json()["balance"]) == 500.00
+
+    # 3. From exactly Rs. 500.00 balance, even Rs. 0.01 withdrawal leaves 499.99 -> REJECTED (400)
+    r_sub_cent = call("POST", f"/api/accounts/{acc}/withdraw", {"amount": 0.01})
+    assert r_sub_cent.status_code == 400
+    r_chk3 = call("GET", f"/api/accounts/{acc}/balance")
+    assert float(r_chk3.json()["balance"]) == 500.00
+
+
+def test_fr10_withdraw_overdraft_protection_no_state_change():
+    """FR-10: Overdraft protection.
+    
+    An amount greater than available balance must return 400,
+    cause no state change, and write no transaction row to the ledger.
+    """
+    acc, _ = make_account()
+
+    r_bal = call("GET", f"/api/accounts/{acc}/balance")
+    skip_if_unimplemented(r_bal, C2)
+    assert r_bal.status_code == 200
+    balance_before = float(r_bal.json()["balance"])
+
+    # Query transaction history before attempted overdraft
+    r_hist_before = call("GET", f"/api/accounts/{acc}/transactions")
+    count_before = r_hist_before.json().get("count", 0) if r_hist_before.status_code == 200 else None
+
+    # Attempt to withdraw more than available balance (overdraft)
+    overdraft_amount = balance_before + 500.00
+    r_overdraft = call("POST", f"/api/accounts/{acc}/withdraw", {"amount": overdraft_amount})
+    skip_if_unimplemented(r_overdraft, C2)
+    assert r_overdraft.status_code == 400, (
+        f"Overdraft withdrawal must return 400, got {r_overdraft.status_code}: {r_overdraft.text}"
+    )
+
+    # Verify balance did NOT change
+    r_bal_after = call("GET", f"/api/accounts/{acc}/balance")
+    assert float(r_bal_after.json()["balance"]) == balance_before, (
+        f"Balance changed after rejected overdraft: before={balance_before}, after={r_bal_after.json()['balance']}"
+    )
+
+    # Verify no transaction row was written to the ledger
+    if count_before is not None:
+        r_hist_after = call("GET", f"/api/accounts/{acc}/transactions")
+        assert r_hist_after.status_code == 200
+        count_after = r_hist_after.json().get("count", 0)
+        assert count_after == count_before, (
+            f"Transaction row was written despite overdraft rejection: count_before={count_before}, count_after={count_after}"
+        )
+
+
+
 def test_fr12_balance_inquiry_returns_current_balance():
     acc, _ = make_account()
     r = call("GET", f"/api/accounts/{acc}/balance")
