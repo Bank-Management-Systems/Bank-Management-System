@@ -3,61 +3,212 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bank Management System</title>
+  <title>Bank Management System · Enterprise Portal</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <!-- Header Bar -->
   <header class="topbar">
-    <div class="brand">🏦 Bank Management System</div>
-    <nav>
-      <a href="index.html">Dashboard</a>
-      <a href="login.html">Login</a>
-    </nav>
+    <div class="brand">
+      <span>🏦</span>
+      <span><span class="gold">Apex</span> Bank Management System</span>
+    </div>
+    <div class="topbar-right">
+      <div id="session-chip-container"></div>
+      <nav id="topbar-nav">
+        <a href="index.html">Portal</a>
+        <a href="login.html">Login Page</a>
+      </nav>
+    </div>
   </header>
 
   <main class="container">
-    <section class="hero">
-      <h1>Team Workspace</h1>
-      <p>
-        Starter UI. Each candidate owns one card below and one JavaScript file in
-        <code>frontend/js/</code>. Replace the placeholder panels with your working
-        screens as you implement your endpoints in <code>backend/candidate*_.../</code>.
-      </p>
+    <!-- ======================================================================
+         1. AUTH VIEW (Shown when user is NOT logged in)
+         ====================================================================== -->
+    <section id="auth-view" style="display: none; max-width: 580px; margin: 20px auto;">
+      <div class="card" style="border-top: 4px solid var(--gold); padding: 32px 28px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <div style="font-size: 2.4rem; margin-bottom: 8px;">🏛️</div>
+          <h1 style="font-size: 1.45rem; color: var(--navy-900); font-weight: 800; margin-bottom: 6px;">Enterprise Banking Portal</h1>
+          <p class="muted" style="font-size: 0.9rem;">Authenticate with your credentials to access system capabilities.</p>
+        </div>
+
+        <!-- Auth Tabs Switcher -->
+        <div style="display: flex; gap: 8px; background: #f1f5f9; padding: 4px; border-radius: var(--radius-md); margin-bottom: 20px;">
+          <button type="button" id="btn-auth-tab-staff" class="tab-btn active" style="flex: 1; justify-content: center;">
+            👔 Staff & Admin Login
+          </button>
+          <button type="button" id="btn-auth-tab-cust" class="tab-btn" style="flex: 1; justify-content: center;">
+            👤 Customer Self-Service
+          </button>
+        </div>
+
+        <!-- Staff / Admin Login Form -->
+        <div id="auth-form-staff-panel">
+          <p class="muted" style="font-size: 0.85rem; margin-bottom: 8px;">
+            Quick Fill Demo Accounts:
+          </p>
+          <div class="chips-row">
+            <span class="chip" onclick="fillStaffCredentials('admin', 'admin123')">👑 Admin: admin / admin123</span>
+            <span class="chip" onclick="fillStaffCredentials('teller_sarah', 'sarah123')">👔 Staff: teller_sarah / sarah123</span>
+          </div>
+          <form id="main-staff-form">
+            <label>
+              Username / Staff ID
+              <input type="text" id="main-staff-user" placeholder="e.g. admin or staff username" required />
+            </label>
+            <label>
+              Password
+              <input type="password" id="main-staff-pass" placeholder="••••••••" required />
+            </label>
+            <button type="submit" class="btn-gold" style="margin-top: 6px; padding: 12px;">
+              Sign In to Banking Terminal &rarr;
+            </button>
+          </form>
+          <div id="main-staff-msg" style="margin-top: 12px;"></div>
+        </div>
+
+        <!-- Customer Login Form -->
+        <div id="auth-form-cust-panel" style="display: none;">
+          <p class="muted" style="font-size: 0.85rem; margin-bottom: 8px;">
+            Quick Fill Demo Accounts:
+          </p>
+          <div class="chips-row">
+            <span class="chip" onclick="fillCustomerCredentials(1001, '1234')">👤 Customer 1001 (PIN: 1234)</span>
+            <span class="chip" onclick="fillCustomerCredentials(1002, '1234')">👤 Customer 1002 (PIN: 1234)</span>
+          </div>
+          <form id="main-cust-form">
+            <label>
+              Account Number
+              <input type="number" id="main-cust-acc" placeholder="1001" required />
+            </label>
+            <label>
+              Security PIN
+              <input type="password" id="main-cust-pin" placeholder="••••" maxlength="6" required />
+            </label>
+            <button type="submit" class="btn-gold" style="margin-top: 6px; padding: 12px;">
+              Sign In as Customer &rarr;
+            </button>
+          </form>
+          <div id="main-cust-msg" style="margin-top: 12px;"></div>
+        </div>
+      </div>
     </section>
 
-    <section class="grid">
-      <article class="card" id="card-c1">
-        <h2>Candidate 1 · Account Management</h2>
-        <p class="muted">FR-01 create · FR-04 modify · FR-05 close</p>
-        <div id="panel-c1" class="panel">Loading…</div>
-      </article>
+    <!-- ======================================================================
+         2. AUTHENTICATED PORTAL VIEW (Shown when user IS logged in)
+         ====================================================================== -->
+    <section id="portal-view" style="display: none;">
+      <!-- Role Greeting Banner -->
+      <div class="role-banner">
+        <div>
+          <h1 id="banner-role-title">Banking Operations Terminal</h1>
+          <p id="banner-role-desc">Role-based capabilities enabled. All privileged transactions are logged.</p>
+        </div>
+        <div id="banner-badge-container"></div>
+      </div>
 
-      <article class="card" id="card-c2">
-        <h2>Candidate 2 · Transactions</h2>
-        <p class="muted">FR-08 deposit · FR-09 withdraw · FR-12 balance</p>
-        <div id="panel-c2" class="panel">Loading…</div>
-      </article>
+      <!-- Navigation Tabs (Dynamically populated based on role) -->
+      <nav class="tabs-nav" id="role-tabs-nav"></nav>
 
-      <article class="card" id="card-c3">
-        <h2>Candidate 3 · Records</h2>
-        <p class="muted">FR-13 transfer · FR-15 history · FR-17 statement</p>
-        <div id="panel-c3" class="panel">Loading…</div>
-      </article>
+      <!-- TAB 1: Admin Staff Management (ADMIN EXCLUSIVE) -->
+      <div id="tab-staff-mgmt" class="tab-content">
+        <div class="grid">
+          <!-- Create Staff Card -->
+          <div class="card">
+            <h2>👥 Provision Staff Account</h2>
+            <p class="muted" style="margin-bottom: 14px;">
+              Only administrators can create staff accounts. Created staff members can immediately log into the branch terminal.
+            </p>
+            <form id="admin-create-staff-form">
+              <label>
+                Staff Username
+                <input type="text" id="new-staff-user" placeholder="e.g. teller_mike" minlength="3" required />
+              </label>
+              <label>
+                Initial Password
+                <input type="password" id="new-staff-pass" placeholder="At least 4 characters" minlength="4" required />
+              </label>
+              <button type="submit" class="btn-gold">
+                Create Staff Account
+              </button>
+            </form>
+            <div id="admin-create-staff-msg" style="margin-top: 10px;"></div>
+          </div>
 
-      <article class="card" id="card-c4">
-        <h2>Candidate 4 · Security</h2>
-        <p class="muted">FR-18 staff login · FR-19 customer login · FR-20 PIN change</p>
-        <div id="panel-c4" class="panel">Loading…</div>
-      </article>
+          <!-- Staff Directory Card -->
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <h2>📋 Active Staff Directory</h2>
+              <button type="button" id="btn-refresh-staff" style="font-size: 0.8rem; padding: 4px 10px; background: #e2e8f0; color: var(--navy-900);">
+                🔄 Refresh
+              </button>
+            </div>
+            <p class="muted">All branch employees authorized to process customer transactions.</p>
+            <div class="table-responsive">
+              <table id="staff-roster-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Role</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody id="staff-roster-tbody">
+                  <tr><td colspan="4" class="muted" style="text-align: center;">Loading staff records…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: Accounts Management (Candidate 1 - FR-01, FR-04, FR-05) -->
+      <div id="tab-accounts" class="tab-content">
+        <div class="card" style="margin-bottom: 16px;">
+          <h2>🏛️ Customer Account Lifecycle Management</h2>
+          <p class="muted">Candidate 1 Module · Open new accounts, modify customer contact/address, or close zero-balance accounts.</p>
+        </div>
+        <div id="panel-c1" class="panel">Loading Account Management…</div>
+      </div>
+
+      <!-- TAB 3: Transactions & Teller (Candidate 2 - FR-08, FR-09, FR-12) -->
+      <div id="tab-transactions" class="tab-content">
+        <div class="card" style="margin-bottom: 16px;">
+          <h2>💳 Cash Counter & Teller Operations</h2>
+          <p class="muted">Candidate 2 Module · Process cash deposits, cash withdrawals (Rs. 500 min balance), and balance inquiries.</p>
+        </div>
+        <div id="panel-c2" class="panel">Loading Transactions…</div>
+      </div>
+
+      <!-- TAB 4: Transfers & Records (Candidate 3 - FR-13, FR-15, FR-17) -->
+      <div id="tab-records" class="tab-content">
+        <div class="card" style="margin-bottom: 16px;">
+          <h2>📊 Inter-Account Transfers & Formal Statements</h2>
+          <p class="muted">Candidate 3 Module · Atomic fund transfers, ordered transaction histories, and reconciled statements.</p>
+        </div>
+        <div id="panel-c3" class="panel">Loading Records & Statements…</div>
+      </div>
+
+      <!-- TAB 5: Security & Credentials (Candidate 4 - FR-18, FR-19, FR-20) -->
+      <div id="tab-security" class="tab-content">
+        <div class="card" style="margin-bottom: 16px;">
+          <h2>🔒 Security Governance & Customer PIN Service</h2>
+          <p class="muted">Candidate 4 Module · Staff session verification and Customer PIN changes with format validation.</p>
+        </div>
+        <div id="panel-c4" class="panel">Loading Security…</div>
+      </div>
     </section>
   </main>
 
   <footer class="footer">
-    <span>Bank Management System · template v1.0</span>
+    <span>Apex Bank Management System · Enterprise Edition</span>
     <span id="api-status">API: checking…</span>
   </footer>
 
-  <!-- Shared helper first, then one file per candidate (edit ONLY yours) -->
+  <!-- Scripts (Shared first, then candidate modules) -->
   <script src="js/app.js"></script>
   <script src="js/candidate1_accounts.js"></script>
   <script src="js/candidate2_transactions.js"></script>

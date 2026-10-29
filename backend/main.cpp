@@ -18,6 +18,7 @@
 
 int main() {
   httplib::Server svr;
+  svr.new_task_queue = [] { return new httplib::ThreadPool(4); };
 
   // --------------------------------------------------------------------------
   // Worked example (implemented): health check used by CI to know the API is up

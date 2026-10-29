@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <mutex>
 #include <mysql/mysql.h>
 
 class Database {
@@ -19,12 +20,16 @@ class Database {
     return db;
   }
 
+  std::recursive_mutex& mutex() { return mtx_; }
+
   MYSQL* handle() {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     if (!connected_) connect();
     return conn_;
   }
 
   void connect() {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     if (connected_) return;
     conn_ = mysql_init(nullptr);
     if (!conn_) throw std::runtime_error("mysql_init failed");
@@ -49,19 +54,25 @@ class Database {
 
   // INSERT / UPDATE / DELETE -> true on success
   bool exec(const std::string& sql) {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     return mysql_query(handle(), sql.c_str()) == 0;
   }
 
   // SELECT -> result set; CALLER MUST free with mysql_free_result()
   MYSQL_RES* select(const std::string& sql) {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     if (mysql_query(handle(), sql.c_str()) != 0) return nullptr;
     return mysql_store_result(handle());
   }
 
   // id of the row inserted by the last exec()
-  unsigned long last_insert_id() { return mysql_insert_id(handle()); }
+  unsigned long last_insert_id() {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    return mysql_insert_id(handle());
+  }
 
   ~Database() {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
     if (conn_) mysql_close(conn_);
   }
 
@@ -72,4 +83,5 @@ class Database {
   }
   MYSQL* conn_ = nullptr;
   bool connected_ = false;
+  std::recursive_mutex mtx_;
 };
