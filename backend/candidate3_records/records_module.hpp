@@ -77,6 +77,15 @@ inline MYSQL_RES* query(Database& db, const std::string& sql) {
   return r;
 }
 
+// Validate YYYY-MM-DD strings used in optional report filters.
+inline bool is_safe_date(const std::string& d) {
+  if (d.size() != 10) return false;
+  for (char c : d) {
+    if (!std::isdigit(static_cast<unsigned char>(c)) && c != '-') return false;
+  }
+  return true;
+}
+
 }  // namespace c3
 
 
@@ -253,10 +262,19 @@ inline void register_record_routes(httplib::Server& svr) {
       mysql_free_result(chk);
       if (!exists) { http_utils::error_json(res, 404, "Account not found"); return; }
 
-      // Return all transactions in consistent chronological order.
+      std::string from_date = req.has_param("from") ? req.get_param_value("from") : "";
+      std::string to_date = req.has_param("to") ? req.get_param_value("to") : "";
+
+      std::string from_cond, to_cond;
+      if (!from_date.empty() && c3::is_safe_date(from_date))
+        from_cond = " AND created_at >= '" + from_date + " 00:00:00'";
+      if (!to_date.empty() && c3::is_safe_date(to_date))
+        to_cond = " AND created_at <= '" + to_date + " 23:59:59'";
+
       MYSQL_RES* rs = c3::query(db,
           "SELECT id,type,amount,balance_after,related_account,created_at "
           "FROM transactions WHERE account_number = " + std::to_string(account) +
+          from_cond + to_cond +
           " ORDER BY created_at ASC, id ASC");
 
       std::ostringstream items;
@@ -316,17 +334,10 @@ inline void register_record_routes(httplib::Server& svr) {
       std::string from_date = req.has_param("from") ? req.get_param_value("from") : "";
       std::string to_date   = req.has_param("to")   ? req.get_param_value("to")   : "";
 
-      // Validate date format (YYYY-MM-DD, digits and hyphens only).
-      auto is_safe_date = [](const std::string& d) {
-        if (d.size() != 10) return false;
-        for (char c : d) if (!std::isdigit(c) && c != '-') return false;
-        return true;
-      };
-
       std::string from_cond, to_cond;
-      if (!from_date.empty() && is_safe_date(from_date))
+      if (!from_date.empty() && c3::is_safe_date(from_date))
         from_cond = " AND created_at >= '" + from_date + " 00:00:00'";
-      if (!to_date.empty()   && is_safe_date(to_date))
+      if (!to_date.empty() && c3::is_safe_date(to_date))
         to_cond   = " AND created_at <= '" + to_date   + " 23:59:59'";
 
       // Fetch transactions within the requested range.
@@ -354,7 +365,7 @@ inline void register_record_routes(httplib::Server& svr) {
       // Closing balance at the end of the requested period.
       // Without a to_date, it is the live account balance.
       long long closing_balance = current_balance;
-      if (!to_date.empty() && is_safe_date(to_date)) {
+      if (!to_date.empty() && c3::is_safe_date(to_date)) {
         // Transactions that happened AFTER the to_date boundary.
         MYSQL_RES* post_rs = c3::query(db,
             "SELECT type, amount FROM transactions "
