@@ -70,6 +70,20 @@ def _seed_bulk_transactions(account_number, count=5000):
             raise RuntimeError(f"Failed to seed transactions via mysql CLI: {res.stderr}")
 
 
+def _count_account_transactions(account_number):
+    """Count transaction rows directly in MySQL for this account."""
+    host, port, user, password, dbname = _get_db_env()
+    sql = f"SELECT COUNT(*) FROM transactions WHERE account_number = {account_number};"
+    cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}", f"-p{password}", "-sN", "-e", sql, dbname]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip().isdigit():
+        return int(res.stdout.strip())
+    # Fallback to records endpoint if available
+    r = call("GET", f"/api/accounts/{account_number}/transactions")
+    if r.status_code == 200:
+        return r.json().get("count", 0)
+    return None
+
 
 def test_fr08_deposit_increases_balance():
     acc, _ = make_account()
@@ -192,6 +206,159 @@ def test_fr10_withdraw_overdraft_protection_no_state_change():
         assert count_after == count_before, (
             f"Transaction row was written despite overdraft rejection: count_before={count_before}, count_after={count_after}"
         )
+
+
+def test_fr11_amount_validation_invalid_class_sweep_deposit():
+    """FR-11: Zero, negative, non-numeric, > Rs. 1,000,000, and 3-decimal amounts all return 400.
+    
+    Rejected attempts leave balance AND transactions table untouched.
+    """
+    acc, _ = make_account()
+
+    r_bal = call("GET", f"/api/accounts/{acc}/balance")
+    skip_if_unimplemented(r_bal, C2)
+    start_bal = float(r_bal.json()["balance"])
+    start_txns = _count_account_transactions(acc)
+
+    invalid_cases = [
+        ({"amount": 0}, "Zero amount (int)"),
+        ({"amount": 0.0}, "Zero amount (float)"),
+        ({"amount": "0"}, "Zero amount (string)"),
+        ({"amount": "0.00"}, "Zero amount (string 0.00)"),
+        ({"amount": -1}, "Negative amount (-1)"),
+        ({"amount": -500}, "Negative amount (-500)"),
+        ({"amount": "-500.00"}, "Negative amount string"),
+        ({"amount": "abc"}, "Non-numeric string 'abc'"),
+        ({"amount": ""}, "Empty string amount"),
+        ({"amount": "12a3"}, "Alphanumeric string"),
+        ({"amount": True}, "Boolean amount"),
+        ({"amount": None}, "Null amount"),
+        ({"amount": 1000000.01}, "Exceeds Rs. 1,000,000 cap by 1 cent"),
+        ({"amount": 1000001}, "Exceeds Rs. 1,000,000 cap by Rs. 1"),
+        ({"amount": 5000000}, "Large amount well above limit"),
+        ({"amount": 10.555}, "3 decimal places (10.555)"),
+        ({"amount": 0.001}, "3 decimal places (0.001)"),
+        ({"amount": 100.1234}, "4 decimal places (100.1234)"),
+        ({"amount": "50.123"}, "3 decimal places in string"),
+        ({}, "Missing amount field"),
+    ]
+
+    for payload, desc in invalid_cases:
+        r = call("POST", f"/api/accounts/{acc}/deposit", payload)
+        skip_if_unimplemented(r, C2)
+        assert r.status_code == 400, f"Deposit {desc} {payload} must return 400, got {r.status_code}: {r.text}"
+        body = r.json()
+        assert "error" in body and body["error"], f"Response must contain error message for {desc}: {r.text}"
+
+        # State check: balance MUST remain completely untouched
+        r_bal_check = call("GET", f"/api/accounts/{acc}/balance")
+        assert float(r_bal_check.json()["balance"]) == start_bal, (
+            f"Balance changed after rejected deposit ({desc}): expected {start_bal}, got {r_bal_check.json()['balance']}"
+        )
+
+        # State check: transactions table MUST remain completely untouched
+        curr_txns = _count_account_transactions(acc)
+        if start_txns is not None and curr_txns is not None:
+            assert curr_txns == start_txns, (
+                f"Transactions table modified after rejected deposit ({desc}): before={start_txns}, after={curr_txns}"
+            )
+
+
+def test_fr11_amount_validation_invalid_class_sweep_withdraw():
+    """FR-11: Validate invalid amount classes on withdrawal.
+    
+    Zero, negative, non-numeric, > Rs. 1,000,000, and 3-decimal amounts all return 400.
+    Rejected attempts leave balance AND transactions table untouched.
+    """
+    acc, _ = make_account()
+
+    r_bal = call("GET", f"/api/accounts/{acc}/balance")
+    skip_if_unimplemented(r_bal, C2)
+    start_bal = float(r_bal.json()["balance"])
+    start_txns = _count_account_transactions(acc)
+
+    invalid_cases = [
+        ({"amount": 0}, "Zero amount (int)"),
+        ({"amount": 0.0}, "Zero amount (float)"),
+        ({"amount": "0"}, "Zero amount (string)"),
+        ({"amount": -1}, "Negative amount (-1)"),
+        ({"amount": -500}, "Negative amount (-500)"),
+        ({"amount": "-500.00"}, "Negative amount string"),
+        ({"amount": "abc"}, "Non-numeric string 'abc'"),
+        ({"amount": ""}, "Empty string amount"),
+        ({"amount": "12a3"}, "Alphanumeric string"),
+        ({"amount": 1000000.01}, "Exceeds Rs. 1,000,000 cap by 1 cent"),
+        ({"amount": 1000001}, "Exceeds Rs. 1,000,000 cap by Rs. 1"),
+        ({"amount": 10.555}, "3 decimal places (10.555)"),
+        ({"amount": 0.001}, "3 decimal places (0.001)"),
+        ({"amount": 100.1234}, "4 decimal places (100.1234)"),
+        ({"amount": "50.123"}, "3 decimal places in string"),
+        ({}, "Missing amount field"),
+    ]
+
+    for payload, desc in invalid_cases:
+        r = call("POST", f"/api/accounts/{acc}/withdraw", payload)
+        skip_if_unimplemented(r, C2)
+        assert r.status_code == 400, f"Withdrawal {desc} {payload} must return 400, got {r.status_code}: {r.text}"
+        body = r.json()
+        assert "error" in body and body["error"], f"Response must contain error message for {desc}: {r.text}"
+
+        # State check: balance MUST remain completely untouched
+        r_bal_check = call("GET", f"/api/accounts/{acc}/balance")
+        assert float(r_bal_check.json()["balance"]) == start_bal, (
+            f"Balance changed after rejected withdrawal ({desc}): expected {start_bal}, got {r_bal_check.json()['balance']}"
+        )
+
+        # State check: transactions table MUST remain completely untouched
+        curr_txns = _count_account_transactions(acc)
+        if start_txns is not None and curr_txns is not None:
+            assert curr_txns == start_txns, (
+                f"Transactions table modified after rejected withdrawal ({desc}): before={start_txns}, after={curr_txns}"
+            )
+
+
+def test_fr11_amount_validation_boundary_accepted():
+    """FR-11: Boundary acceptance.
+    
+    Exactly Rs. 1,000,000 and 2-decimal values are accepted (boundary works).
+    """
+    acc, _ = make_account()
+
+    r_bal = call("GET", f"/api/accounts/{acc}/balance")
+    skip_if_unimplemented(r_bal, C2)
+    start_bal = float(r_bal.json()["balance"])
+
+    # 1. Deposit 2-decimal value: Rs. 500.25 -> MUST SUCCEED (200)
+    r_dec = call("POST", f"/api/accounts/{acc}/deposit", {"amount": 500.25})
+    skip_if_unimplemented(r_dec, C2)
+    assert r_dec.status_code == 200, f"Deposit 500.25 failed: {r_dec.text}"
+    expected_bal = round(start_bal + 500.25, 2)
+    assert float(r_dec.json()["balance"]) == expected_bal
+
+    # 2. Deposit exactly Rs. 1,000,000 (upper cap boundary) -> MUST SUCCEED (200)
+    r_cap = call("POST", f"/api/accounts/{acc}/deposit", {"amount": 1000000})
+    skip_if_unimplemented(r_cap, C2)
+    assert r_cap.status_code == 200, f"Deposit 1,000,000 failed: {r_cap.text}"
+    expected_bal = round(expected_bal + 1000000.0, 2)
+    assert float(r_cap.json()["balance"]) == expected_bal
+
+    # 3. Withdraw 2-decimal value: Rs. 250.75 -> MUST SUCCEED (200)
+    r_w_dec = call("POST", f"/api/accounts/{acc}/withdraw", {"amount": 250.75})
+    skip_if_unimplemented(r_w_dec, C2)
+    assert r_w_dec.status_code == 200, f"Withdraw 250.75 failed: {r_w_dec.text}"
+    expected_bal = round(expected_bal - 250.75, 2)
+    assert float(r_w_dec.json()["balance"]) == expected_bal
+
+    # 4. Withdraw exactly Rs. 1,000,000 (account has > 1,000,500) -> MUST SUCCEED (200)
+    r_w_cap = call("POST", f"/api/accounts/{acc}/withdraw", {"amount": 1000000.00})
+    skip_if_unimplemented(r_w_cap, C2)
+    assert r_w_cap.status_code == 200, f"Withdraw 1,000,000 failed: {r_w_cap.text}"
+    expected_bal = round(expected_bal - 1000000.0, 2)
+    assert float(r_w_cap.json()["balance"]) == expected_bal
+
+    # Final balance inquiry check
+    r_final = call("GET", f"/api/accounts/{acc}/balance")
+    assert float(r_final.json()["balance"]) == expected_bal
 
 
 

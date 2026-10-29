@@ -27,16 +27,13 @@ constexpr double HARD_LIMIT_LATENCY_BUDGET_SECONDS = 2.0; // Hard limit per V1
 constexpr long long MIN_BALANCE_CENTS = 50000LL;          // Rs. 500.00 minimum balance (FR-10)
 }  // namespace candidate2
 
+// Backwards-compatible aliases delegating to shared http_utils validator (FR-11)
 inline bool validate_amount(double amount, std::string& err_msg) {
-  if (std::isnan(amount) || std::isinf(amount) || amount <= 0.0) {
-    err_msg = "Amount must be greater than zero";
-    return false;
-  }
-  return true;
+  return http_utils::validate_amount(amount, err_msg);
 }
 
 inline bool validate_amount(double amount) {
-  return !std::isnan(amount) && !std::isinf(amount) && amount > 0.0;
+  return http_utils::validate_amount(amount);
 }
 
 inline double get_transaction_amount(const std::string& body, const std::string& key) {
@@ -51,18 +48,20 @@ inline double get_transaction_amount(const std::string& body, const std::string&
 inline void register_transaction_routes(httplib::Server& svr) {
 
   // -------------------------------------------------------------------------
-  // FR-08  POST /api/accounts/(\d+)/deposit   body: {"amount": 1000}
+  // FR-08 / FR-11  POST /api/accounts/(\d+)/deposit   body: {"amount": 1000}
+  // Rules (FR-11):
+  //   - Shared validator: amount numeric, > 0, <= 1,000,000, at most 2 decimals
+  //   - Invalid class -> 400 with specific error message, no DB access / no state change
   // Success -> 200 {"account_number": <id>, "balance": <new_balance>}
-  // Failure -> 400 (amount <= 0 / non-numeric / account closed), 404 unknown account
+  // Failure -> 400 (validation failure / account closed), 404 unknown account
   // Also: write a row into transactions (type 'DEPOSIT') - see database/schema.sql
   // -------------------------------------------------------------------------
   svr.Post(R"(/api/accounts/(\d+)/deposit)", [](const httplib::Request& req, httplib::Response& res) {
     std::string id = req.matches[1];
-    double amount = get_transaction_amount(req.body, "amount");
-    
+    double amount = 0.0;
     std::string err_msg;
-    if (!validate_amount(amount, err_msg)) {
-      http_utils::error_json(res, 400, "Deposit amount must be greater than zero");
+    if (!http_utils::validate_amount(req.body, amount, err_msg)) {
+      http_utils::error_json(res, 400, err_msg);
       return;
     }
     
@@ -125,22 +124,21 @@ inline void register_transaction_routes(httplib::Server& svr) {
   });
 
   // -------------------------------------------------------------------------
-  // FR-09 / FR-10  POST /api/accounts/(\d+)/withdraw  body: {"amount": 500}
+  // FR-09 / FR-10 / FR-11  POST /api/accounts/(\d+)/withdraw  body: {"amount": 500}
   // Rules:
-  //   1. Amount validation: validate_amount(amount) -> positive numeric > 0
-  //   2. Overdraft protection: amount > available balance -> 400 (never partial debit)
-  //   3. Boundary rule: (balance - amount) >= Rs. 500 -> leaving exactly Rs. 500 succeeds (200),
+  //   1. Amount validation (FR-11): http_utils::validate_amount -> numeric, > 0, <= 1,000,000, <= 2 decimals
+  //   2. Overdraft protection (FR-10): amount > available balance -> 400 (never partial debit)
+  //   3. Boundary rule (FR-10): (balance - amount) >= Rs. 500 -> leaving exactly Rs. 500 succeeds (200),
   //      leaving anything less (e.g. Rs. 499.99) -> 400 with message naming minimum balance
   //   4. State safety: rejected withdrawal writes no transactions row and changes no balance
   // Success -> 200 with new balance | Failure -> 400 with clear message | 404 unknown account
   // -------------------------------------------------------------------------
   svr.Post(R"(/api/accounts/(\d+)/withdraw)", [](const httplib::Request& req, httplib::Response& res) {
     std::string id = req.matches[1];
-    double amount = get_transaction_amount(req.body, "amount");
-    
+    double amount = 0.0;
     std::string err_msg;
-    if (!validate_amount(amount, err_msg)) {
-      http_utils::error_json(res, 400, "Withdrawal amount must be greater than zero");
+    if (!http_utils::validate_amount(req.body, amount, err_msg)) {
+      http_utils::error_json(res, 400, err_msg);
       return;
     }
     
