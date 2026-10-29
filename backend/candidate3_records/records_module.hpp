@@ -290,8 +290,107 @@ inline void register_record_routes(httplib::Server& svr) {
   // -------------------------------------------------------------------------
   svr.Get(R"(/api/accounts/(\d+)/statement)",
       [](const httplib::Request& req, httplib::Response& res) {
-    // TODO: implemented in FR-17 commit
-    http_utils::not_implemented(res, "FR-17 statement",
-                                "Candidate 3 (backend/candidate3_records/records_module.hpp)");
+    long account = c3::path_id(req);
+    if (account <= 0) {
+      http_utils::error_json(res, 400, "Invalid account number");
+      return;
+    }
+
+    try {
+      Database& db = Database::instance();
+
+      // Fetch the account's authoritative current balance.
+      MYSQL_RES* acc_rs = c3::query(db,
+          "SELECT balance FROM accounts WHERE account_number = " +
+          std::to_string(account));
+      MYSQL_ROW acc_row = mysql_fetch_row(acc_rs);
+      if (!acc_row) {
+        mysql_free_result(acc_rs);
+        http_utils::error_json(res, 404, "Account not found");
+        return;
+      }
+      long long current_balance = c3::to_cents(acc_row[0]);
+      mysql_free_result(acc_rs);
+
+      // Optional date-range filters from query string.
+      std::string from_date = req.has_param("from") ? req.get_param_value("from") : "";
+      std::string to_date   = req.has_param("to")   ? req.get_param_value("to")   : "";
+
+      // Validate date format (YYYY-MM-DD, digits and hyphens only).
+      auto is_safe_date = [](const std::string& d) {
+        if (d.size() != 10) return false;
+        for (char c : d) if (!std::isdigit(c) && c != '-') return false;
+        return true;
+      };
+
+      std::string from_cond, to_cond;
+      if (!from_date.empty() && is_safe_date(from_date))
+        from_cond = " AND created_at >= '" + from_date + " 00:00:00'";
+      if (!to_date.empty()   && is_safe_date(to_date))
+        to_cond   = " AND created_at <= '" + to_date   + " 23:59:59'";
+
+      // Fetch transactions within the requested range.
+      MYSQL_RES* rs = c3::query(db,
+          "SELECT id,type,amount,balance_after,related_account,created_at "
+          "FROM transactions WHERE account_number = " + std::to_string(account) +
+          from_cond + to_cond +
+          " ORDER BY created_at ASC, id ASC");
+
+      std::ostringstream items;
+      unsigned long count  = 0;
+      long long range_net  = 0;   // net change within the range
+      MYSQL_ROW row;
+      while ((row = mysql_fetch_row(rs))) {
+        std::string t = row[1] ? row[1] : "";
+        long long   a = c3::to_cents(row[2]);
+        if (t == "DEPOSIT" || t == "TRANSFER_IN")        range_net += a;
+        else if (t == "WITHDRAWAL" || t == "TRANSFER_OUT") range_net -= a;
+        if (count) items << ',';
+        items << c3::tx_json(row);
+        ++count;
+      }
+      mysql_free_result(rs);
+
+      // Closing balance at the end of the requested period.
+      // Without a to_date, it is the live account balance.
+      long long closing_balance = current_balance;
+      if (!to_date.empty() && is_safe_date(to_date)) {
+        // Transactions that happened AFTER the to_date boundary.
+        MYSQL_RES* post_rs = c3::query(db,
+            "SELECT type, amount FROM transactions "
+            "WHERE account_number = " + std::to_string(account) +
+            " AND created_at > '" + to_date + " 23:59:59'"
+            " ORDER BY created_at ASC, id ASC");
+        long long post_net = 0;
+        MYSQL_ROW pr;
+        while ((pr = mysql_fetch_row(post_rs))) {
+          std::string t = pr[0] ? pr[0] : "";
+          long long   a = c3::to_cents(pr[1]);
+          if (t == "DEPOSIT" || t == "TRANSFER_IN")        post_net += a;
+          else if (t == "WITHDRAWAL" || t == "TRANSFER_OUT") post_net -= a;
+        }
+        mysql_free_result(post_rs);
+        closing_balance = current_balance - post_net;
+      }
+
+      // opening_balance + range_net == closing_balance (reconciliation identity).
+      long long opening_balance = closing_balance - range_net;
+
+      std::string from_json = from_date.empty() ? "null" : ('"' + from_date + '"');
+      std::string to_json   = to_date.empty()   ? "null" : ('"' + to_date   + '"');
+
+      res.status = 200;
+      res.set_content(
+          "{\"account_number\":"  + std::to_string(account) +
+          ",\"from\":"            + from_json +
+          ",\"to\":"              + to_json +
+          ",\"opening_balance\":" + c3::money(opening_balance) +
+          ",\"closing_balance\":" + c3::money(closing_balance) +
+          ",\"transactions\":["   + items.str() + "]}",
+          "application/json");
+
+    } catch (const std::exception&) {
+      http_utils::error_json(res, 500, "Could not generate account statement");
+    }
   });
 }

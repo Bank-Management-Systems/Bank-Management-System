@@ -29,10 +29,17 @@ document.getElementById("panel-c3").innerHTML = `
     <div id="history-result"></div>
   </div>
 
-  <!-- FR-17 placeholder (implemented in next commit) -->
+  <!-- FR-17: Account Statement with date pickers and printable layout -->
   <div class="card">
     <h3>Account Statement (FR-17)</h3>
-    <p class="muted">Coming soon.</p>
+    <form id="statement-form">
+      <input type="number" id="stmt-acc"  placeholder="Account Number" required style="margin:4px;padding:6px;width:160px;">
+      <input type="date"   id="stmt-from" style="margin:4px;padding:6px;" title="From date (optional)">
+      <input type="date"   id="stmt-to"   style="margin:4px;padding:6px;" title="To date (optional)">
+      <button type="submit" style="margin:4px;padding:6px 12px;">Generate Statement</button>
+    </form>
+    <div id="statement-result"></div>
+    <button id="print-btn" style="display:none;margin-top:8px;padding:6px 12px;" onclick="window.print()">&#x1F5A8; Print Statement</button>
   </div>
 `;
 
@@ -108,5 +115,41 @@ document.getElementById("history-form").addEventListener("submit", async (e) => 
       renderTxTable(d.transactions);
   } else {
     showResult(result, r, "History");
+  }
+});
+
+/* ---- FR-17: Statement with from/to date pickers and printable layout ---- */
+document.getElementById("statement-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const acc      = document.getElementById("stmt-acc").value;
+  const from     = document.getElementById("stmt-from").value;
+  const to       = document.getElementById("stmt-to").value;
+  const result   = document.getElementById("statement-result");
+  const printBtn = document.getElementById("print-btn");
+
+  let path = `/api/accounts/${acc}/statement`;
+  const params = [];
+  if (from) params.push(`from=${encodeURIComponent(from)}`);
+  if (to)   params.push(`to=${encodeURIComponent(to)}`);
+  if (params.length) path += "?" + params.join("&");
+
+  const r = await api("GET", path);
+  if (r.status === 200) {
+    const d = r.data;
+    result.innerHTML = `
+      <span class="msg-ok">&#x2714; Statement for account #${d.account_number}</span>
+      <table style="margin:.5rem 0;border-collapse:collapse;font-size:.95em;">
+        <tr><td style="padding:4px 12px 4px 0;"><strong>Period</strong></td>
+            <td>${d.from ?? "All time"} &rarr; ${d.to ?? "today"}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;"><strong>Opening Balance</strong></td>
+            <td>&#x20B9;${d.opening_balance}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;"><strong>Closing Balance</strong></td>
+            <td><strong>&#x20B9;${d.closing_balance}</strong></td></tr>
+      </table>` +
+      renderTxTable(d.transactions);
+    printBtn.style.display = "inline-block";
+  } else {
+    showResult(result, r, "Statement");
+    printBtn.style.display = "none";
   }
 });
