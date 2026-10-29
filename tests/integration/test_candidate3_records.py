@@ -55,3 +55,65 @@ def test_fr17_statement_reconciles_with_balance():
     assert r.status_code == 200, r.text
     body = r.json()
     assert "closing_balance" in body, "statement must state the closing balance"
+def test_failed_transfer_leaves_balances_and_logs_unchanged():
+    """A rejected transfer must not change balances or add transaction rows."""
+    acc_from, acc_to = SEED_ACCOUNT_A, SEED_ACCOUNT_B
+
+    # Capture both balances before the rejected transfer.
+    from_before = call("GET", f"/api/accounts/{acc_from}/balance")
+    to_before = call("GET", f"/api/accounts/{acc_to}/balance")
+
+    assert from_before.status_code == 200, from_before.text
+    assert to_before.status_code == 200, to_before.text
+
+    from_balance_before = from_before.json()["balance"]
+    to_balance_before = to_before.json()["balance"]
+
+    # Capture transaction histories before the transfer.
+    from_history_before = call(
+        "GET", f"/api/accounts/{acc_from}/transactions"
+    )
+    to_history_before = call(
+        "GET", f"/api/accounts/{acc_to}/transactions"
+    )
+
+    assert from_history_before.status_code == 200, from_history_before.text
+    assert to_history_before.status_code == 200, to_history_before.text
+
+    from_count_before = from_history_before.json()["count"]
+    to_count_before = to_history_before.json()["count"]
+
+    # A transfer to a nonexistent account must fail.
+    response = call(
+        "POST",
+        "/api/transfers",
+        {
+            "from_account": acc_from,
+            "to_account": 999999,
+            "amount": 100,
+        },
+    )
+    skip_if_unimplemented(response, C3)
+    assert response.status_code in (400, 404), response.text
+
+    # Verify that neither balance changed.
+    from_after = call("GET", f"/api/accounts/{acc_from}/balance")
+    to_after = call("GET", f"/api/accounts/{acc_to}/balance")
+
+    assert from_after.status_code == 200, from_after.text
+    assert to_after.status_code == 200, to_after.text
+    assert from_after.json()["balance"] == from_balance_before
+    assert to_after.json()["balance"] == to_balance_before
+
+    # Verify that no transaction records were added.
+    from_history_after = call(
+        "GET", f"/api/accounts/{acc_from}/transactions"
+    )
+    to_history_after = call(
+        "GET", f"/api/accounts/{acc_to}/transactions"
+    )
+
+    assert from_history_after.status_code == 200, from_history_after.text
+    assert to_history_after.status_code == 200, to_history_after.text
+    assert from_history_after.json()["count"] == from_count_before
+    assert to_history_after.json()["count"] == to_count_before

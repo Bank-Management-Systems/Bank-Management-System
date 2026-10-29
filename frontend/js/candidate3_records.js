@@ -7,188 +7,149 @@
    ========================================================================== */
 
 document.getElementById("panel-c3").innerHTML = `
-  <div class="card" style="margin-bottom: 14px;">
+  <!-- FR-13: Atomic Transfer Form -->
+  <div class="card" style="margin-bottom:1rem;">
     <h3>Transfer Funds (FR-13)</h3>
     <form id="transfer-form">
-      <input type="number" id="transfer-from-account" placeholder="From Account Number" required>
-      <input type="number" id="transfer-to-account" placeholder="To Account Number" required>
-      <input type="number" id="transfer-amount" placeholder="Amount (Rs.)" min="1" required>
-      <button type="submit">Transfer Funds</button>
+      <input type="number" id="tf-from"   placeholder="From Account" required style="margin:4px;padding:6px;width:160px;">
+      <input type="number" id="tf-to"     placeholder="To Account"   required style="margin:4px;padding:6px;width:160px;">
+      <input type="number" id="tf-amount" placeholder="Amount"       required min="1" step="0.01" style="margin:4px;padding:6px;width:120px;">
+      <button type="submit" style="margin:4px;padding:6px 12px;">Transfer</button>
     </form>
-    <div id="transfer-result" style="margin-top: 10px;"></div>
+    <div id="transfer-result"></div>
   </div>
 
-  <div class="card" style="margin-bottom: 14px;">
+  <!-- FR-15: Transaction History -->
+  <div class="card" style="margin-bottom:1rem;">
     <h3>Transaction History (FR-15)</h3>
     <form id="history-form">
-      <input type="number" id="history-account-number" placeholder="Account Number" required>
-      <button type="submit">View History</button>
+      <input type="number" id="hist-acc" placeholder="Account Number" required style="margin:4px;padding:6px;width:160px;">
+      <button type="submit" style="margin:4px;padding:6px 12px;">Load History</button>
     </form>
-    <div id="history-result" style="margin-top: 10px;"></div>
+    <div id="history-result"></div>
   </div>
 
-  <div class="card" style="margin-bottom: 14px;">
+  <!-- FR-17: Account Statement with date pickers and printable layout -->
+  <div class="card">
     <h3>Account Statement (FR-17)</h3>
     <form id="statement-form">
-      <input type="number" id="statement-account-number" placeholder="Account Number" required>
-      <div style="display: flex; gap: 8px;">
-        <label style="flex: 1;">
-          From:
-          <input type="date" id="statement-from-date">
-        </label>
-        <label style="flex: 1;">
-          To:
-          <input type="date" id="statement-to-date">
-        </label>
-      </div>
-      <div style="display: flex; gap: 8px;">
-        <button type="submit" style="flex: 1;">Generate Statement</button>
-        <button type="button" id="btn-print-statement" style="background: var(--navy);">Print / Export</button>
-      </div>
+      <input type="number" id="stmt-acc"  placeholder="Account Number" required style="margin:4px;padding:6px;width:160px;">
+      <input type="date"   id="stmt-from" style="margin:4px;padding:6px;" title="From date (optional)">
+      <input type="date"   id="stmt-to"   style="margin:4px;padding:6px;" title="To date (optional)">
+      <button type="submit" style="margin:4px;padding:6px 12px;">Generate Statement</button>
     </form>
-    <div id="statement-result" style="margin-top: 10px;"></div>
+    <div id="statement-result"></div>
+    <button id="print-btn" style="display:none;margin-top:8px;padding:6px 12px;" onclick="window.print()">&#x1F5A8; Print Statement</button>
   </div>
 `;
 
-// FR-13: Fund transfer
+/* ---- Helper: render a transactions array as an HTML table ---- */
+function renderTxTable(transactions) {
+  if (!transactions || transactions.length === 0)
+    return '<p class="muted">No transactions found.</p>';
+
+  const typeColor = {
+    DEPOSIT:      "#2a9d4e",
+    WITHDRAWAL:   "#c0392b",
+    TRANSFER_IN:  "#1a6fb5",
+    TRANSFER_OUT: "#e67e22",
+  };
+
+  const rows = transactions.map(tx => {
+    const color = typeColor[tx.type] || "#555";
+    const badge = `<span style="background:${color};color:#fff;border-radius:4px;padding:2px 7px;font-size:.8em;">${tx.type}</span>`;
+    return `<tr>
+      <td style="padding:5px;">${tx.id ?? ""}</td>
+      <td style="padding:5px;">${badge}</td>
+      <td style="padding:5px;text-align:right;">&#x20B9;${tx.amount}</td>
+      <td style="padding:5px;text-align:right;">&#x20B9;${tx.balance_after}</td>
+      <td style="padding:5px;">${tx.related_account ?? "&#x2014;"}</td>
+      <td style="padding:5px;">${tx.created_at ?? ""}</td>
+    </tr>`;
+  }).join("");
+
+  return `<table style="width:100%;border-collapse:collapse;font-size:.9em;margin-top:.5rem;">
+    <thead style="background:#f4f4f4;">
+      <tr>
+        <th style="padding:6px;text-align:left;">ID</th>
+        <th style="padding:6px;text-align:left;">Type</th>
+        <th style="padding:6px;text-align:right;">Amount</th>
+        <th style="padding:6px;text-align:right;">Balance After</th>
+        <th style="padding:6px;">Related Acc</th>
+        <th style="padding:6px;text-align:left;">Date/Time</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+/* ---- FR-13: Transfer form ---- */
 document.getElementById("transfer-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const fromAcc = Number(document.getElementById("transfer-from-account").value);
-  const toAcc = Number(document.getElementById("transfer-to-account").value);
-  const amount = Number(document.getElementById("transfer-amount").value);
-  const resultDiv = document.getElementById("transfer-result");
+  const from   = parseInt(document.getElementById("tf-from").value, 10);
+  const to     = parseInt(document.getElementById("tf-to").value, 10);
+  const amount = parseFloat(document.getElementById("tf-amount").value);
+  const result = document.getElementById("transfer-result");
 
-  const r = await api("POST", "/api/transfers", {
-    from_account: fromAcc,
-    to_account: toAcc,
-    amount,
-  });
-
-  if (r.status === 200 && r.data) {
-    showResult(resultDiv, r, "Transfer completed successfully");
-    document.getElementById("transfer-amount").value = "";
+  const r = await api("POST", "/api/transfers", { from_account: from, to_account: to, amount });
+  if (r.status === 200) {
+    const d = r.data;
+    result.innerHTML = `<span class="msg-ok">&#x2714; Transfer successful</span>
+      <p>From #${d.from_account}: &#x20B9;${d.from_balance} &nbsp;|&nbsp; To #${d.to_account}: &#x20B9;${d.to_balance}</p>`;
   } else {
-    showResult(resultDiv, r, "Transfer failed");
+    showResult(result, r, "Transfer");
   }
 });
 
-// FR-15: View transaction history
+/* ---- FR-15: History table ---- */
 document.getElementById("history-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const accNum = document.getElementById("history-account-number").value.trim();
-  const resultDiv = document.getElementById("history-result");
+  const acc    = document.getElementById("hist-acc").value;
+  const result = document.getElementById("history-result");
 
-  const r = await api("GET", `/api/accounts/${accNum}/transactions`);
-  if (r.status === 200 && r.data) {
+  const r = await api("GET", `/api/accounts/${acc}/transactions`);
+  if (r.status === 200) {
     const d = r.data;
-    if (!d.transactions || d.transactions.length === 0) {
-      resultDiv.innerHTML = '<div class="muted" style="padding: 10px; background: #f8fafc; border-radius: 6px; text-align: center;">No transactions found for this account.</div>';
-      return;
-    }
-
-    const rows = d.transactions.map(t => {
-      const isCredit = t.type === "DEPOSIT" || t.type === "TRANSFER_IN";
-      const badgeColor = isCredit ? "var(--ok)" : "var(--bad)";
-      const sign = isCredit ? "+" : "-";
-      return `
-        <tr>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee;">${escapeHtml(t.created_at || "")}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee;"><span style="color: ${badgeColor}; font-weight: 600;">${escapeHtml(t.type || "")}</span></td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee; text-align: right; color: ${badgeColor}; font-weight: 600;">${sign}Rs. ${Number(t.amount).toFixed(2)}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee; text-align: right;">Rs. ${Number(t.balance_after).toFixed(2)}</td>
-        </tr>
-      `;
-    }).join("");
-
-    resultDiv.innerHTML = `
-      <div style="font-size: 0.9em; margin-bottom: 6px;">Total Transactions: <strong>${d.count || d.transactions.length}</strong></div>
-      <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
-        <thead>
-          <tr style="background: #eef2f6; text-align: left;">
-            <th style="padding: 6px 8px;">Date</th>
-            <th style="padding: 6px 8px;">Type</th>
-            <th style="padding: 6px 8px; text-align: right;">Amount</th>
-            <th style="padding: 6px 8px; text-align: right;">Balance</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-    `;
+    result.innerHTML =
+      `<span class="msg-ok">&#x2714; ${d.count} transaction(s) for account #${d.account_number}</span>` +
+      renderTxTable(d.transactions);
   } else {
-    showResult(resultDiv, r, "History");
+    showResult(result, r, "History");
   }
 });
 
-// FR-17: Generate account statement
+/* ---- FR-17: Statement with from/to date pickers and printable layout ---- */
 document.getElementById("statement-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const accNum = document.getElementById("statement-account-number").value.trim();
-  const fromDate = document.getElementById("statement-from-date").value;
-  const toDate = document.getElementById("statement-to-date").value;
-  const resultDiv = document.getElementById("statement-result");
+  const acc      = document.getElementById("stmt-acc").value;
+  const from     = document.getElementById("stmt-from").value;
+  const to       = document.getElementById("stmt-to").value;
+  const result   = document.getElementById("statement-result");
+  const printBtn = document.getElementById("print-btn");
 
-  let query = "";
+  let path = `/api/accounts/${acc}/statement`;
   const params = [];
-  if (fromDate) params.push(`from=${encodeURIComponent(fromDate)}`);
-  if (toDate) params.push(`to=${encodeURIComponent(toDate)}`);
-  if (params.length > 0) query = "?" + params.join("&");
+  if (from) params.push(`from=${encodeURIComponent(from)}`);
+  if (to)   params.push(`to=${encodeURIComponent(to)}`);
+  if (params.length) path += "?" + params.join("&");
 
-  const r = await api("GET", `/api/accounts/${accNum}/statement${query}`);
-  if (r.status === 200 && r.data) {
+  const r = await api("GET", path);
+  if (r.status === 200) {
     const d = r.data;
-    let rowsHtml = "";
-    if (d.transactions && d.transactions.length > 0) {
-      rowsHtml = d.transactions.map(t => `
-        <tr>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee;">${escapeHtml(t.created_at || "")}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee;"><b>${escapeHtml(t.type || "")}</b></td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee; text-align: right;">Rs. ${Number(t.amount).toFixed(2)}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e3e8ee; text-align: right;">Rs. ${Number(t.balance_after).toFixed(2)}</td>
-        </tr>
-      `).join("");
-    } else {
-      rowsHtml = `<tr><td colspan="4" style="padding: 10px; text-align: center; color: var(--muted);">No transactions in this period</td></tr>`;
-    }
-
-    resultDiv.innerHTML = `
-      <div class="statement-sheet" style="background: #fafbfc; border: 1px solid #d0d7de; border-radius: 6px; padding: 12px; margin-top: 8px;">
-        <div style="display: flex; justify-content: space-between; border-bottom: 2px solid var(--navy); padding-bottom: 6px; margin-bottom: 8px;">
-          <div><strong>Account Statement: #${escapeHtml(String(d.account_number))}</strong></div>
-          <div style="font-size: 0.85em; color: var(--muted);">Period: ${d.from ? escapeHtml(d.from) : "Opening"} to ${d.to ? escapeHtml(d.to) : "Current"}</div>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9em;">
-          <span>Opening Balance: <strong>Rs. ${Number(d.opening_balance).toFixed(2)}</strong></span>
-          <span>Closing Balance: <strong>Rs. ${Number(d.closing_balance).toFixed(2)}</strong></span>
-        </div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
-          <thead>
-            <tr style="background: #eef2f6; text-align: left;">
-              <th style="padding: 6px 8px;">Date</th>
-              <th style="padding: 6px 8px;">Type</th>
-              <th style="padding: 6px 8px; text-align: right;">Amount</th>
-              <th style="padding: 6px 8px; text-align: right;">Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml}
-          </tbody>
-        </table>
-        <div style="margin-top: 8px; font-size: 0.8em; color: var(--ok); text-align: right;">
-          ✔ Reconciled: Opening Balance + Range Activity = Closing Balance
-        </div>
-      </div>
-    `;
+    result.innerHTML = `
+      <span class="msg-ok">&#x2714; Statement for account #${d.account_number}</span>
+      <table style="margin:.5rem 0;border-collapse:collapse;font-size:.95em;">
+        <tr><td style="padding:4px 12px 4px 0;"><strong>Period</strong></td>
+            <td>${d.from ?? "All time"} &rarr; ${d.to ?? "today"}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;"><strong>Opening Balance</strong></td>
+            <td>&#x20B9;${d.opening_balance}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;"><strong>Closing Balance</strong></td>
+            <td><strong>&#x20B9;${d.closing_balance}</strong></td></tr>
+      </table>` +
+      renderTxTable(d.transactions);
+    printBtn.style.display = "inline-block";
   } else {
-    showResult(resultDiv, r, "Statement");
+    showResult(result, r, "Statement");
+    printBtn.style.display = "none";
   }
 });
-
-// Print statement
-document.getElementById("btn-print-statement").addEventListener("click", () => {
-  window.print();
-});
-
-
-
