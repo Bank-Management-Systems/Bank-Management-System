@@ -57,6 +57,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     REFERENCES accounts (account_number)
 );
 
+-- ---------------------------------------------------------------------------
+-- NFR-01: Performance — transaction response time (Candidate 2)
+-- Additive index: speeds history/balance-derived queries as the ledger grows.
+-- ---------------------------------------------------------------------------
+CREATE INDEX idx_txn_account_created ON transactions(account_number, created_at);
+
 -- Quick ownership check:
 --   Candidate 1 -> accounts           (INSERT / UPDATE identity + status)
 --   Candidate 2 -> accounts.balance   (via deposit / withdraw), transactions rows

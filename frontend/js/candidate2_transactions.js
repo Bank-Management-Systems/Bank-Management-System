@@ -31,10 +31,13 @@
     </div>
     
     <div class="card" style="margin-bottom: 14px;">
-      <h3>Withdraw Cash (FR-09)</h3>
+      <h3>Withdraw Cash (FR-09, FR-10)</h3>
       <form id="withdraw-form">
         <input type="number" id="withdraw-account-number" placeholder="Account Number" required>
-        <input type="number" id="withdraw-amount" placeholder="Amount (Min. Rs. 500 must remain)" min="1" step="any" required>
+        <input type="number" id="withdraw-amount" placeholder="Amount (Min. Rs. 500 must remain)" min="0.01" step="any" required>
+        <small class="muted" style="display:block; margin: 4px 0 8px;">
+          Minimum balance rule: account must retain at least Rs. 500.00. Overdrafts are rejected with no state change.
+        </small>
         <button type="submit">Withdraw</button>
       </form>
       <div id="withdraw-result" style="margin-top: 8px;"></div>
@@ -75,7 +78,14 @@
       const resultDiv = document.getElementById("withdraw-result");
       
       const r = await api("POST", `/api/accounts/${accNum}/withdraw`, { amount });
-      showResult(resultDiv, r, "Withdrawal successful");
+      if (r.status === 200) {
+        showResult(resultDiv, r, "Withdrawal successful");
+      } else {
+        const errDetail = (r.data && r.data.error) ? r.data.error : "Withdrawal rejected";
+        resultDiv.innerHTML = `<span class="msg-bad">✖ ${escapeHtml(errDetail)} — Minimum Balance Rule: Accounts must maintain at least Rs. 500.00 at all times.</span><pre>${escapeHtml(
+          JSON.stringify(r.data, null, 2)
+        )}</pre>`;
+      }
     });
   }
 })();
