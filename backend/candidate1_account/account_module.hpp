@@ -1,6 +1,7 @@
 // ============================================================================
 // CANDIDATE 1 - Account Management module
-// Scope     : FR-01 Create account | FR-04 Modify customer details | FR-05 Close account
+// Scope     : FR-01 Create account | FR-02 Account number hardening & uniqueness
+//             FR-04 Modify customer details | FR-05 Close account
 // Reference : docs/Bank_Management_System_Test_Plan_V2.docx  -> Chapter 4 (4.1 - 4.3)
 // Tests     : tests/integration/test_candidate1_account.py  (your acceptance contract)
 // ============================================================================
@@ -12,13 +13,17 @@
 inline void register_account_routes(httplib::Server& svr) {
 
   // -------------------------------------------------------------------------
-  // FR-01  POST /api/accounts  -  create a new bank account
-  // Rules (Test Plan 4.1): mandatory name; opening deposit >= Rs. 500;
+  // FR-01 / FR-02  POST /api/accounts  -  create a new bank account
+  // Rules (Test Plan 4.1 & 4.2): mandatory name; opening deposit >= Rs. 500;
   // account number auto-generated (schema starts at 1001).
+  // FR-02: Any client-supplied account_number in the request body is strictly
+  // ignored and overridden by the system's AUTO_INCREMENT generator.
   // Success -> 201 {"account_number": <int>, "balance": <opening_deposit>}
   // Failure -> 400 {"error": "..."} (blank name, deposit below minimum, ...)
   // -------------------------------------------------------------------------
   svr.Post("/api/accounts", [](const httplib::Request& req, httplib::Response& res) {
+    // FR-02: Client-supplied account_number is intentionally ignored/overridden.
+    // We never extract or insert account_number; the DB generator assigns it.
     std::string name = http_utils::trim(http_utils::get_string(req.body, "name"));
     if (name.empty()) {
       http_utils::error_json(res, 400, "Name is mandatory and cannot be blank");
