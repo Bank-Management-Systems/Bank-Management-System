@@ -419,3 +419,100 @@ def test_nfr02_robustness_sweep_and_recovery_integrity():
         res_after = _run_mysql_query("SELECT COUNT(*) FROM accounts;")
         count_after = int(res_after.stdout.strip())
         assert count_after == count_before + 1, "Database must not contain partial or corrupted rows from rejected requests"
+
+
+# ============================================================================
+# FR-03: Account Lookup Details & Freshness (UT_07 - UT_09 / IT_07 - IT_09 / ST_05 - ST_06)
+# ============================================================================
+
+def test_fr03_get_account_details_success():
+    """UT_07 / IT_07: Retrieve correct details for a known account (all expected fields present)."""
+    acc, created = make_account(
+        name="Lookup Target User",
+        address="100 Inspection Boulevard",
+        contact="9876500123",
+        type="Savings",
+        opening_deposit=5500,
+    )
+    assert created, "Account creation must succeed"
+
+    r = call("GET", f"/api/accounts/{acc}")
+    skip_if_unimplemented(r, C1)
+    assert r.status_code == 200, r.text
+
+    body = r.json()
+    assert int(body.get("account_number", 0)) == acc
+    assert body.get("name") == "Lookup Target User"
+    assert body.get("address") == "100 Inspection Boulevard"
+    assert body.get("contact") == "9876500123"
+    assert body.get("type") == "Savings"
+    assert body.get("status") == "active"
+    assert float(body.get("balance", 0)) == 5500.0
+    assert "created_at" in body or "opened_at" in body, "created_at/opened_at timestamp must be present"
+
+
+def test_fr03_get_account_unknown_and_malformed_returns_404():
+    """UT_08 / IT_08: Unknown account numbers and malformed account IDs return 404."""
+    # Unknown non-existent account ID
+    r_unknown = call("GET", "/api/accounts/999999")
+    skip_if_unimplemented(r_unknown, C1)
+    assert r_unknown.status_code == 404, f"Expected 404 for unknown account, got {r_unknown.status_code}"
+
+    # Zero or invalid account ID
+    r_zero = call("GET", "/api/accounts/0")
+    skip_if_unimplemented(r_zero, C1)
+    assert r_zero.status_code == 404, f"Expected 404 for zero account, got {r_zero.status_code}"
+
+    # Malformed non-numeric account path
+    r_malformed = call("GET", "/api/accounts/not_a_valid_number")
+    skip_if_unimplemented(r_malformed, C1)
+    assert r_malformed.status_code == 404, f"Expected 404 for malformed ID, got {r_malformed.status_code}"
+
+
+def test_fr03_account_details_freshness_after_modify_deposit_close():
+    """UT_09 / IT_09 / ST_05: Details change immediately after modify (FR-04), deposit (FR-08), and close (FR-05)."""
+    acc, created = make_account(
+        name="Freshness Tracking User",
+        address="10 Old St",
+        contact="9876543210",
+        opening_deposit=5000,
+    )
+    assert created
+
+    # Baseline check
+    r0 = call("GET", f"/api/accounts/{acc}")
+    assert r0.status_code == 200
+    assert r0.json().get("address") == "10 Old St"
+    assert float(r0.json().get("balance", 0)) == 5000.0
+    assert r0.json().get("status") == "active"
+
+    # 1. Freshness after Modify (FR-04): Address and contact updated
+    r_mod = call("PUT", f"/api/accounts/{acc}", {
+        "address": "20 New Fresh Ave",
+        "contact": "9998887776",
+    })
+    assert r_mod.status_code == 200
+
+    r1 = call("GET", f"/api/accounts/{acc}")
+    assert r1.status_code == 200
+    assert r1.json().get("address") == "20 New Fresh Ave", "Address must immediately reflect modified value"
+    assert r1.json().get("contact") == "9998887776", "Contact must immediately reflect modified value"
+
+    # 2. Freshness after Deposit (FR-08): Balance updated
+    r_dep = call("POST", f"/api/accounts/{acc}/deposit", {"amount": 2500})
+    if r_dep.status_code != 501:  # If Candidate 2 deposit is implemented
+        assert r_dep.status_code == 200
+        r2 = call("GET", f"/api/accounts/{acc}")
+        assert r2.status_code == 200
+        assert float(r2.json().get("balance", 0)) == 7500.0, "Balance must immediately reflect deposit"
+
+    # 3. Freshness after Close (FR-05): Status updated to 'closed'
+    # Set balance to 0 in database to allow closure under FR-05
+    _run_mysql_query(f"UPDATE accounts SET balance = 0.00 WHERE account_number = {acc};")
+    r_close = call("POST", f"/api/accounts/{acc}/close")
+    assert r_close.status_code == 200
+    assert r_close.json().get("status") == "closed"
+
+    r3 = call("GET", f"/api/accounts/{acc}")
+    assert r3.status_code == 200
+    assert r3.json().get("status") == "closed", "Status must immediately reflect 'closed'"

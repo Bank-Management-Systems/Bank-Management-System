@@ -1,7 +1,7 @@
 // ============================================================================
 // CANDIDATE 1 - Account Management module
 // Scope     : FR-01 Create account | FR-02 Account number hardening & uniqueness
-//             NFR-02 Input validation & robustness
+//             FR-03 Account lookup details | NFR-02 Input validation & robustness
 //             FR-04 Modify customer details | FR-05 Close account
 // Reference : docs/Bank_Management_System_Test_Plan_V2.docx  -> Chapter 4 (4.1 - 4.3)
 // Tests     : tests/integration/test_candidate1_account.py  (your acceptance contract)
@@ -114,42 +114,64 @@ inline void register_account_routes(httplib::Server& svr) {
   });
 
   // -------------------------------------------------------------------------
-  // GET /api/accounts/(\d+)  -  get account details (pre-filling edit forms)
+  // FR-03  GET /api/accounts/(\d+)  -  get account details
+  // Scope (Test Plan 4.3): look up an account by account_number and view its
+  // latest stored details (name, address, contact, type, balance, status, created_at).
+  // Unknown or malformed id -> 404.
   // -------------------------------------------------------------------------
   svr.Get(R"(/api/accounts/(\d+))", [](const httplib::Request& req, httplib::Response& res) {
-    std::string id = req.matches[1];
-    Database& db = Database::instance();
+    try {
+      std::string id = req.matches[1];
+      Database& db = Database::instance();
 
-    std::string sql = "SELECT account_number, name, address, contact, type, balance, status FROM accounts WHERE account_number = " + id;
-    MYSQL_RES* result = db.select(sql);
-    if (!result) {
-      http_utils::error_json(res, 500, "Database error");
-      return;
-    }
+      std::string sql = "SELECT account_number, name, address, contact, type, balance, status, opened_at FROM accounts WHERE account_number = " + id;
+      MYSQL_RES* result = db.select(sql);
+      if (!result) {
+        http_utils::error_json(res, 500, "Database error");
+        return;
+      }
 
-    MYSQL_ROW row = mysql_fetch_row(result);
-    if (!row) {
+      MYSQL_ROW row = mysql_fetch_row(result);
+      if (!row) {
+        mysql_free_result(result);
+        http_utils::error_json(res, 404, "Unknown account");
+        return;
+      }
+
+      std::string name = row[1] ? row[1] : "";
+      std::string address = row[2] ? row[2] : "";
+      std::string contact = row[3] ? row[3] : "";
+      std::string type = row[4] ? row[4] : "";
+      std::string balance = row[5] ? row[5] : "0.00";
+      std::string status = row[6] ? row[6] : "";
+      std::string created_at = row[7] ? row[7] : "";
       mysql_free_result(result);
+
+      auto json_escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+          if (c == '"') out += "\\\"";
+          else if (c == '\\') out += "\\\\";
+          else out += c;
+        }
+        return out;
+      };
+
+      std::string json = "{\"account_number\": " + id +
+                         ", \"name\": \"" + json_escape(name) +
+                         "\", \"address\": \"" + json_escape(address) +
+                         "\", \"contact\": \"" + json_escape(contact) +
+                         "\", \"type\": \"" + json_escape(type) +
+                         "\", \"balance\": " + balance +
+                         ", \"status\": \"" + json_escape(status) +
+                         "\", \"created_at\": \"" + json_escape(created_at) +
+                         "\", \"opened_at\": \"" + json_escape(created_at) + "\"}";
+      res.set_content(json, "application/json");
+    } catch (const std::exception&) {
       http_utils::error_json(res, 404, "Unknown account");
-      return;
+    } catch (...) {
+      http_utils::error_json(res, 404, "Unknown account");
     }
-
-    std::string name = row[1] ? row[1] : "";
-    std::string address = row[2] ? row[2] : "";
-    std::string contact = row[3] ? row[3] : "";
-    std::string type = row[4] ? row[4] : "";
-    std::string balance = row[5] ? row[5] : "0.00";
-    std::string status = row[6] ? row[6] : "";
-    mysql_free_result(result);
-
-    std::string json = "{\"account_number\": " + id +
-                       ", \"name\": \"" + name +
-                       "\", \"address\": \"" + address +
-                       "\", \"contact\": \"" + contact +
-                       "\", \"type\": \"" + type +
-                       "\", \"balance\": " + balance +
-                       ", \"status\": \"" + status + "\"}";
-    res.set_content(json, "application/json");
   });
 
   // -------------------------------------------------------------------------

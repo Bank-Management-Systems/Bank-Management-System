@@ -1,11 +1,23 @@
 /* ==========================================================================
    CANDIDATE 1 - Account Management UI
-   Backend endpoints: POST /api/accounts, PUT /api/accounts/{id},
-                      POST /api/accounts/{id}/close   (you implement these)
+   Backend endpoints: POST /api/accounts, GET /api/accounts/{id},
+                      PUT /api/accounts/{id}, POST /api/accounts/{id}/close
    Contract: tests/integration/test_candidate1_account.py
    ========================================================================== */
 
 document.getElementById("panel-c1").innerHTML = `
+  <div class="card" style="margin-bottom: 14px;">
+    <h3>🔍 Look Up Account Details (FR-03)</h3>
+    <p class="muted" style="margin-bottom: 10px;">Retrieve current account standing, customer information, balance, and status.</p>
+    <form id="lookup-account-form">
+      <div style="display: flex; gap: 8px;">
+        <input type="number" id="lookup-account-number" placeholder="Enter Account Number (e.g. 1001)" style="flex: 1;" required>
+        <button type="submit" id="btn-lookup-account" style="white-space: nowrap;">Look Up Account</button>
+      </div>
+    </form>
+    <div id="lookup-result" style="margin-top: 10px;"></div>
+  </div>
+
   <div class="card" style="margin-bottom: 14px;">
     <h3>Open New Account (FR-01)</h3>
     <form id="create-account-form">
@@ -48,6 +60,57 @@ document.getElementById("panel-c1").innerHTML = `
     <div id="close-result" style="margin-top: 8px;"></div>
   </div>
 `;
+
+// FR-03: Look up account details
+window.lookupAccountDetails = async function(accNum, targetEl = document.getElementById("lookup-result")) {
+  if (!accNum) {
+    if (targetEl) targetEl.innerHTML = '<span class="msg-bad">Please enter an account number.</span>';
+    return;
+  }
+  const r = await api("GET", `/api/accounts/${accNum}`);
+  if (!targetEl) return;
+  if (r.status === 200 && r.data) {
+    const acc = r.data;
+    const isClosed = acc.status === "closed";
+    const statusBadge = isClosed
+      ? '<span class="badge" style="background:#ef4444; color:#fff; padding:2px 8px; border-radius:4px; font-weight:600;">closed</span>'
+      : '<span class="badge" style="background:#10b981; color:#fff; padding:2px 8px; border-radius:4px; font-weight:600;">active</span>';
+    targetEl.innerHTML = `
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #e2e8f0; padding-bottom:8px;">
+          <h4 style="margin:0; color:var(--navy-900);">Account #${escapeHtml(String(acc.account_number))}</h4>
+          ${statusBadge}
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:0.9rem;">
+          <div><span class="muted">Customer Name:</span> <strong>${escapeHtml(acc.name || "N/A")}</strong></div>
+          <div><span class="muted">Account Type:</span> <strong>${escapeHtml(acc.type || "Savings")}</strong></div>
+          <div><span class="muted">Current Balance:</span> <strong style="color:var(--navy-900); font-size:1.05rem;">Rs. ${Number(acc.balance || 0).toFixed(2)}</strong></div>
+          <div><span class="muted">Contact Number:</span> <strong>${escapeHtml(acc.contact || "N/A")}</strong></div>
+          <div style="grid-column:1 / -1;"><span class="muted">Registered Address:</span> <strong>${escapeHtml(acc.address || "N/A")}</strong></div>
+          <div style="grid-column:1 / -1;"><span class="muted">Created / Opened:</span> <span class="muted">${escapeHtml(acc.created_at || acc.opened_at || "N/A")}</span></div>
+        </div>
+      </div>
+    `;
+  } else {
+    showResult(targetEl, r, "Account details lookup");
+  }
+};
+
+const lookupForm = document.getElementById("lookup-account-form");
+if (lookupForm) {
+  lookupForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const accNum = document.getElementById("lookup-account-number").value.trim();
+    await window.lookupAccountDetails(accNum);
+  });
+}
+
+// Pre-fill customer account number if logged in
+const custAcc = localStorage.getItem("customer_account");
+if (custAcc) {
+  const lookupInput = document.getElementById("lookup-account-number");
+  if (lookupInput) lookupInput.value = custAcc;
+}
 
 // FR-01: Create new account
 document.getElementById("create-account-form").addEventListener("submit", async (e) => {
