@@ -276,3 +276,146 @@ def test_fr05_close_unknown_account_returns_404():
     r = call("POST", "/api/accounts/999999/close")
     skip_if_unimplemented(r, C1)
     assert r.status_code == 404
+
+
+# ============================================================================
+# NFR-02: Input Validation & Server Robustness Sweep (NT_01 - NT_04)
+# ============================================================================
+
+def test_nfr02_malformed_json_and_empty_body():
+    """NT_01: Malformed JSON, non-JSON text, and empty bodies return 400 (never 500/hang)."""
+    headers = {"Content-Type": "application/json"}
+
+    # 1. Empty body
+    r1 = call("POST", "/api/accounts", body=None, data="", headers=headers)
+    skip_if_unimplemented(r1, C1)
+    assert r1.status_code == 400, f"Expected 400 for empty body, got {r1.status_code}"
+
+    # 2. Plain text / non-JSON
+    r2 = call("POST", "/api/accounts", body=None, data="not a json payload", headers=headers)
+    skip_if_unimplemented(r2, C1)
+    assert r2.status_code == 400, f"Expected 400 for plain text, got {r2.status_code}"
+
+    # 3. Truncated / malformed JSON
+    r3 = call("POST", "/api/accounts", body=None, data='{"name": "Broken', headers=headers)
+    skip_if_unimplemented(r3, C1)
+    assert r3.status_code == 400, f"Expected 400 for truncated JSON, got {r3.status_code}"
+
+
+def test_nfr02_oversized_payload_and_string_fields():
+    """NT_02: Oversized strings (> 100/200 chars, 10k chars) and control chars are rejected (clean 400)."""
+    # 10,000-character name
+    huge_name = "A" * 10000
+    r1 = call("POST", "/api/accounts", {
+        "name": huge_name,
+        "address": "1 Valid St",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r1, C1)
+    assert r1.status_code == 400, f"Oversized name must be rejected with 400, got {r1.status_code}"
+
+    # 10,000-character address
+    huge_addr = "B" * 10000
+    r2 = call("POST", "/api/accounts", {
+        "name": "Normal Name",
+        "address": huge_addr,
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r2, C1)
+    assert r2.status_code == 400, f"Oversized address must be rejected with 400, got {r2.status_code}"
+
+    # String with ASCII control characters
+    bad_name = "Bad\x00Name\x07Alert"
+    r3 = call("POST", "/api/accounts", {
+        "name": bad_name,
+        "address": "1 Valid St",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r3, C1)
+    assert r3.status_code == 400, f"Control characters must be rejected with 400, got {r3.status_code}"
+
+
+def test_nfr02_alphabetic_and_unicode_in_numeric_fields():
+    """NT_03: Alphabetic, special, or unicode characters in numeric fields are rejected."""
+    # Alphabetic opening deposit
+    r1 = call("POST", "/api/accounts", {
+        "name": "Alpha Deposit",
+        "address": "1 MG Road",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": "five-thousand",
+    })
+    skip_if_unimplemented(r1, C1)
+    assert r1.status_code == 400, f"Alphabetic deposit must return 400, got {r1.status_code}"
+
+    # Unicode currency symbol in deposit
+    r2 = call("POST", "/api/accounts", {
+        "name": "Unicode Deposit",
+        "address": "1 MG Road",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": "₹5000",
+    })
+    skip_if_unimplemented(r2, C1)
+    assert r2.status_code == 400, f"Unicode deposit must return 400, got {r2.status_code}"
+
+    # Alphabetic characters in contact number
+    r3 = call("POST", "/api/accounts", {
+        "name": "Alpha Contact",
+        "address": "1 MG Road",
+        "contact": "98765ABCDE",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r3, C1)
+    assert r3.status_code == 400, f"Alphabetic contact must return 400, got {r3.status_code}"
+
+    # Negative deposit
+    r4 = call("POST", "/api/accounts", {
+        "name": "Negative Deposit",
+        "address": "1 MG Road",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": -500,
+    })
+    skip_if_unimplemented(r4, C1)
+    assert r4.status_code == 400, f"Negative deposit must return 400, got {r4.status_code}"
+
+
+def test_nfr02_robustness_sweep_and_recovery_integrity():
+    """NT_04: Rapid mixed sequence of invalid requests does not crash server; valid request succeeds afterwards with intact DB."""
+    # Capture initial database count
+    res_before = _run_mysql_query("SELECT COUNT(*) FROM accounts;")
+    count_before = int(res_before.stdout.strip()) if res_before.returncode == 0 and res_before.stdout.strip().isdigit() else None
+
+    hostile_payloads = [
+        {"name": "", "address": "foo", "contact": "1234567890", "opening_deposit": 5000},
+        {"name": "X" * 500, "address": "foo", "contact": "1234567890", "opening_deposit": 5000},
+        {"name": "Normal", "address": "X" * 500, "contact": "1234567890", "opening_deposit": 5000},
+        {"name": "Normal", "address": "foo", "contact": "short", "opening_deposit": 5000},
+        {"name": "Normal", "address": "foo", "contact": "1234567890", "type": "InvalidType", "opening_deposit": 5000},
+        {"name": "Normal", "address": "foo", "contact": "1234567890", "opening_deposit": "abc"},
+        {"name": "Normal", "address": "foo", "contact": "1234567890", "opening_deposit": 100},
+        {"name": "Normal\x00Bad", "address": "foo", "contact": "1234567890", "opening_deposit": 5000},
+    ]
+
+    for p in hostile_payloads:
+        r = call("POST", "/api/accounts", p)
+        assert r.status_code == 400, f"Hostile payload {p} should return 400, got {r.status_code}"
+
+    # Verify server is still alive and responsive: a valid create must succeed
+    valid_acc, created = make_account(name="Recovery After Fuzz")
+    assert created, "Server must remain responsive and valid creation must succeed after hostile burst"
+    assert valid_acc >= 1001
+
+    # Verify database was not corrupted: only exactly 1 new account was added
+    if count_before is not None:
+        res_after = _run_mysql_query("SELECT COUNT(*) FROM accounts;")
+        count_after = int(res_after.stdout.strip())
+        assert count_after == count_before + 1, "Database must not contain partial or corrupted rows from rejected requests"
