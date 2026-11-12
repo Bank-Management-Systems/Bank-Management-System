@@ -276,3 +276,243 @@ def test_fr05_close_unknown_account_returns_404():
     r = call("POST", "/api/accounts/999999/close")
     skip_if_unimplemented(r, C1)
     assert r.status_code == 404
+
+
+# ============================================================================
+# NFR-02: Input Validation & Server Robustness Sweep (NT_01 - NT_04)
+# ============================================================================
+
+def test_nfr02_malformed_json_and_empty_body():
+    """NT_01: Malformed JSON, non-JSON text, and empty bodies return 400 (never 500/hang)."""
+    headers = {"Content-Type": "application/json"}
+
+    # 1. Empty body
+    r1 = call("POST", "/api/accounts", body=None, data="", headers=headers)
+    skip_if_unimplemented(r1, C1)
+    assert r1.status_code == 400, f"Expected 400 for empty body, got {r1.status_code}"
+
+    # 2. Plain text / non-JSON
+    r2 = call("POST", "/api/accounts", body=None, data="not a json payload", headers=headers)
+    skip_if_unimplemented(r2, C1)
+    assert r2.status_code == 400, f"Expected 400 for plain text, got {r2.status_code}"
+
+    # 3. Truncated / malformed JSON
+    r3 = call("POST", "/api/accounts", body=None, data='{"name": "Broken', headers=headers)
+    skip_if_unimplemented(r3, C1)
+    assert r3.status_code == 400, f"Expected 400 for truncated JSON, got {r3.status_code}"
+
+
+def test_nfr02_oversized_payload_and_string_fields():
+    """NT_02: Oversized strings (> 100/200 chars, 10k chars) and control chars are rejected (clean 400)."""
+    # 10,000-character name
+    huge_name = "A" * 10000
+    r1 = call("POST", "/api/accounts", {
+        "name": huge_name,
+        "address": "1 Valid St",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r1, C1)
+    assert r1.status_code == 400, f"Oversized name must be rejected with 400, got {r1.status_code}"
+
+    # 10,000-character address
+    huge_addr = "B" * 10000
+    r2 = call("POST", "/api/accounts", {
+        "name": "Normal Name",
+        "address": huge_addr,
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r2, C1)
+    assert r2.status_code == 400, f"Oversized address must be rejected with 400, got {r2.status_code}"
+
+    # String with ASCII control characters
+    bad_name = "Bad\x00Name\x07Alert"
+    r3 = call("POST", "/api/accounts", {
+        "name": bad_name,
+        "address": "1 Valid St",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r3, C1)
+    assert r3.status_code == 400, f"Control characters must be rejected with 400, got {r3.status_code}"
+
+
+def test_nfr02_alphabetic_and_unicode_in_numeric_fields():
+    """NT_03: Alphabetic, special, or unicode characters in numeric fields are rejected."""
+    # Alphabetic opening deposit
+    r1 = call("POST", "/api/accounts", {
+        "name": "Alpha Deposit",
+        "address": "1 MG Road",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": "five-thousand",
+    })
+    skip_if_unimplemented(r1, C1)
+    assert r1.status_code == 400, f"Alphabetic deposit must return 400, got {r1.status_code}"
+
+    # Unicode currency symbol in deposit
+    r2 = call("POST", "/api/accounts", {
+        "name": "Unicode Deposit",
+        "address": "1 MG Road",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": "₹5000",
+    })
+    skip_if_unimplemented(r2, C1)
+    assert r2.status_code == 400, f"Unicode deposit must return 400, got {r2.status_code}"
+
+    # Alphabetic characters in contact number
+    r3 = call("POST", "/api/accounts", {
+        "name": "Alpha Contact",
+        "address": "1 MG Road",
+        "contact": "98765ABCDE",
+        "type": "Savings",
+        "opening_deposit": 5000,
+    })
+    skip_if_unimplemented(r3, C1)
+    assert r3.status_code == 400, f"Alphabetic contact must return 400, got {r3.status_code}"
+
+    # Negative deposit
+    r4 = call("POST", "/api/accounts", {
+        "name": "Negative Deposit",
+        "address": "1 MG Road",
+        "contact": "9876543210",
+        "type": "Savings",
+        "opening_deposit": -500,
+    })
+    skip_if_unimplemented(r4, C1)
+    assert r4.status_code == 400, f"Negative deposit must return 400, got {r4.status_code}"
+
+
+def test_nfr02_robustness_sweep_and_recovery_integrity():
+    """NT_04: Rapid mixed sequence of invalid requests does not crash server; valid request succeeds afterwards with intact DB."""
+    # Capture initial database count
+    res_before = _run_mysql_query("SELECT COUNT(*) FROM accounts;")
+    count_before = int(res_before.stdout.strip()) if res_before.returncode == 0 and res_before.stdout.strip().isdigit() else None
+
+    hostile_payloads = [
+        {"name": "", "address": "foo", "contact": "1234567890", "opening_deposit": 5000},
+        {"name": "X" * 500, "address": "foo", "contact": "1234567890", "opening_deposit": 5000},
+        {"name": "Normal", "address": "X" * 500, "contact": "1234567890", "opening_deposit": 5000},
+        {"name": "Normal", "address": "foo", "contact": "short", "opening_deposit": 5000},
+        {"name": "Normal", "address": "foo", "contact": "1234567890", "type": "InvalidType", "opening_deposit": 5000},
+        {"name": "Normal", "address": "foo", "contact": "1234567890", "opening_deposit": "abc"},
+        {"name": "Normal", "address": "foo", "contact": "1234567890", "opening_deposit": 100},
+        {"name": "Normal\x00Bad", "address": "foo", "contact": "1234567890", "opening_deposit": 5000},
+    ]
+
+    for p in hostile_payloads:
+        r = call("POST", "/api/accounts", p)
+        assert r.status_code == 400, f"Hostile payload {p} should return 400, got {r.status_code}"
+
+    # Verify server is still alive and responsive: a valid create must succeed
+    valid_acc, created = make_account(name="Recovery After Fuzz")
+    assert created, "Server must remain responsive and valid creation must succeed after hostile burst"
+    assert valid_acc >= 1001
+
+    # Verify database was not corrupted: only exactly 1 new account was added
+    if count_before is not None:
+        res_after = _run_mysql_query("SELECT COUNT(*) FROM accounts;")
+        count_after = int(res_after.stdout.strip())
+        assert count_after == count_before + 1, "Database must not contain partial or corrupted rows from rejected requests"
+
+
+# ============================================================================
+# FR-03: Account Lookup Details & Freshness (UT_07 - UT_09 / IT_07 - IT_09 / ST_05 - ST_06)
+# ============================================================================
+
+def test_fr03_get_account_details_success():
+    """UT_07 / IT_07: Retrieve correct details for a known account (all expected fields present)."""
+    acc, created = make_account(
+        name="Lookup Target User",
+        address="100 Inspection Boulevard",
+        contact="9876500123",
+        type="Savings",
+        opening_deposit=5500,
+    )
+    assert created, "Account creation must succeed"
+
+    r = call("GET", f"/api/accounts/{acc}")
+    skip_if_unimplemented(r, C1)
+    assert r.status_code == 200, r.text
+
+    body = r.json()
+    assert int(body.get("account_number", 0)) == acc
+    assert body.get("name") == "Lookup Target User"
+    assert body.get("address") == "100 Inspection Boulevard"
+    assert body.get("contact") == "9876500123"
+    assert body.get("type") == "Savings"
+    assert body.get("status") == "active"
+    assert float(body.get("balance", 0)) == 5500.0
+    assert "created_at" in body or "opened_at" in body, "created_at/opened_at timestamp must be present"
+
+
+def test_fr03_get_account_unknown_and_malformed_returns_404():
+    """UT_08 / IT_08: Unknown account numbers and malformed account IDs return 404."""
+    # Unknown non-existent account ID
+    r_unknown = call("GET", "/api/accounts/999999")
+    skip_if_unimplemented(r_unknown, C1)
+    assert r_unknown.status_code == 404, f"Expected 404 for unknown account, got {r_unknown.status_code}"
+
+    # Zero or invalid account ID
+    r_zero = call("GET", "/api/accounts/0")
+    skip_if_unimplemented(r_zero, C1)
+    assert r_zero.status_code == 404, f"Expected 404 for zero account, got {r_zero.status_code}"
+
+    # Malformed non-numeric account path
+    r_malformed = call("GET", "/api/accounts/not_a_valid_number")
+    skip_if_unimplemented(r_malformed, C1)
+    assert r_malformed.status_code == 404, f"Expected 404 for malformed ID, got {r_malformed.status_code}"
+
+
+def test_fr03_account_details_freshness_after_modify_deposit_close():
+    """UT_09 / IT_09 / ST_05: Details change immediately after modify (FR-04), deposit (FR-08), and close (FR-05)."""
+    acc, created = make_account(
+        name="Freshness Tracking User",
+        address="10 Old St",
+        contact="9876543210",
+        opening_deposit=5000,
+    )
+    assert created
+
+    # Baseline check
+    r0 = call("GET", f"/api/accounts/{acc}")
+    assert r0.status_code == 200
+    assert r0.json().get("address") == "10 Old St"
+    assert float(r0.json().get("balance", 0)) == 5000.0
+    assert r0.json().get("status") == "active"
+
+    # 1. Freshness after Modify (FR-04): Address and contact updated
+    r_mod = call("PUT", f"/api/accounts/{acc}", {
+        "address": "20 New Fresh Ave",
+        "contact": "9998887776",
+    })
+    assert r_mod.status_code == 200
+
+    r1 = call("GET", f"/api/accounts/{acc}")
+    assert r1.status_code == 200
+    assert r1.json().get("address") == "20 New Fresh Ave", "Address must immediately reflect modified value"
+    assert r1.json().get("contact") == "9998887776", "Contact must immediately reflect modified value"
+
+    # 2. Freshness after Deposit (FR-08): Balance updated
+    r_dep = call("POST", f"/api/accounts/{acc}/deposit", {"amount": 2500})
+    if r_dep.status_code != 501:  # If Candidate 2 deposit is implemented
+        assert r_dep.status_code == 200
+        r2 = call("GET", f"/api/accounts/{acc}")
+        assert r2.status_code == 200
+        assert float(r2.json().get("balance", 0)) == 7500.0, "Balance must immediately reflect deposit"
+
+    # 3. Freshness after Close (FR-05): Status updated to 'closed'
+    # Set balance to 0 in database to allow closure under FR-05
+    _run_mysql_query(f"UPDATE accounts SET balance = 0.00 WHERE account_number = {acc};")
+    r_close = call("POST", f"/api/accounts/{acc}/close")
+    assert r_close.status_code == 200
+    assert r_close.json().get("status") == "closed"
+
+    r3 = call("GET", f"/api/accounts/{acc}")
+    assert r3.status_code == 200
+    assert r3.json().get("status") == "closed", "Status must immediately reflect 'closed'"

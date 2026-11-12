@@ -35,6 +35,87 @@ inline std::string trim(const std::string& s) {
   return a == std::string::npos ? "" : s.substr(a, b - a + 1);
 }
 
+// ============================================================================
+// NFR-02: Shared Input Validation & Server Robustness Helpers
+// ============================================================================
+
+// Check for ASCII control characters (0..31 except \t, \n, \r, and 127 DEL),
+// including JSON unicode escaped control characters like \u0000..\u001f
+inline bool has_control_chars(const std::string& s) {
+  for (size_t i = 0; i < s.size(); ++i) {
+    unsigned char c = s[i];
+    if ((c < 32 && c != '\t' && c != '\n' && c != '\r') || c == 127) {
+      return true;
+    }
+    if (c == '\\' && i + 5 < s.size() && s[i + 1] == 'u') {
+      if (s[i + 2] == '0' && s[i + 3] == '0') {
+        char h1 = s[i + 4];
+        char h2 = s[i + 5];
+        if (h1 == '0' || h1 == '1') {
+          // Allow \u0009 (\t), \u000a (\n), \u000d (\r)
+          if (!(h1 == '0' && (h2 == '9' || h2 == 'a' || h2 == 'A' || h2 == 'd' || h2 == 'D'))) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Check for oversized payload (default cap: 64KB)
+inline bool is_payload_oversized(const std::string& body, size_t max_bytes = 65536) {
+  return body.size() > max_bytes;
+}
+
+// Check for basic JSON object structure
+inline bool is_valid_json_envelope(const std::string& body) {
+  std::string t = trim(body);
+  return !t.empty() && t.front() == '{' && t.back() == '}';
+}
+
+// Validate string length and charset
+inline bool validate_string(const std::string& s, size_t max_len, const std::string& field_name,
+                            std::string& err_msg, bool allow_empty = false) {
+  std::string t = trim(s);
+  if (t.empty()) {
+    if (!allow_empty) {
+      err_msg = field_name + " is mandatory and cannot be blank";
+      return false;
+    }
+    return true;
+  }
+  if (t.size() > max_len) {
+    err_msg = field_name + " exceeds maximum allowed length of " + std::to_string(max_len) + " characters";
+    return false;
+  }
+  if (has_control_chars(t)) {
+    err_msg = field_name + " contains invalid control characters";
+    return false;
+  }
+  return true;
+}
+
+// Validate contact number (must be 10-15 numeric digits)
+inline bool validate_contact(const std::string& contact, std::string& err_msg) {
+  std::string c = trim(contact);
+  if (c.empty()) {
+    err_msg = "Contact number is mandatory";
+    return false;
+  }
+  if (c.size() < 10 || c.size() > 15) {
+    err_msg = "Contact number must be between 10 and 15 digits";
+    return false;
+  }
+  for (char ch : c) {
+    if (ch < '0' || ch > '9') {
+      err_msg = "Contact number must contain only numeric digits";
+      return false;
+    }
+  }
+  return true;
+}
+
 // Extract a string field; returns "" when absent
 inline std::string get_string(const std::string& body, const std::string& key) {
   std::string pat = "\"" + key + "\"";
