@@ -4,6 +4,7 @@
 // Owner      : SHARED (each candidate adds exactly ONE registration line below)
 // ============================================================================
 #include <cstdlib>
+#include <csignal>
 #include <iostream>
 #include <string>
 
@@ -16,8 +17,19 @@
 #include "candidate3_records/records_module.hpp"       // Candidate 3: FR-13, FR-15, FR-17
 #include "candidate4_security/security_module.hpp"     // Candidate 4: FR-18, FR-19, FR-20
 
+static httplib::Server* g_svr = nullptr;
+
+static void handle_signal(int) {
+  if (g_svr) {
+    g_svr->stop();
+  }
+}
+
 int main() {
   httplib::Server svr;
+  g_svr = &svr;
+  std::signal(SIGINT, handle_signal);
+  std::signal(SIGTERM, handle_signal);
   svr.new_task_queue = [] { return new httplib::ThreadPool(4); };
 
   // --------------------------------------------------------------------------

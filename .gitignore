@@ -1,7 +1,14 @@
 # build artifacts
 backend/bank_server
 backend/*.o
+backend/*.gcda
+backend/*.gcno
+backend/*.gcov
+*.gcda
+*.gcno
+*.gcov
 *.log
+.coverage
 
 # python
 __pycache__/
@@ -16,3 +23,4 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+.~lock*

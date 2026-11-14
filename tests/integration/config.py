@@ -14,6 +14,16 @@ import time
 import pytest
 import requests
 
+# Load root .env if present
+env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.env"))
+if os.path.exists(env_path):
+    with open(env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip().strip("'").strip('"'))
+
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8080")
 TIMEOUT = 10  # seconds
 
