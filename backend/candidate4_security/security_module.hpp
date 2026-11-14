@@ -235,8 +235,19 @@ inline void register_security_routes(httplib::Server& svr) {
     if (!row) {
       mysql_free_result(result);
 
-      // Check if account exists in accounts table with fallback default PIN 1234
-      if (pin == "1234") {
+      // Check if user record already exists in users for this customer account
+      bool user_exists = false;
+      std::string u_chk = "SELECT id FROM users WHERE username = '" + esc_acc + "' AND role = 'customer'";
+      MYSQL_RES* u_res = db.select(u_chk);
+      if (u_res) {
+        if (mysql_fetch_row(u_res)) {
+          user_exists = true;
+        }
+        mysql_free_result(u_res);
+      }
+
+      // Check if account exists in accounts table with fallback default PIN 1234 ONLY IF user record doesn't exist yet
+      if (!user_exists && pin == "1234") {
         std::string check_acc = "SELECT account_number, status FROM accounts WHERE account_number = " + esc_acc;
         MYSQL_RES* acc_res = db.select(check_acc);
         if (acc_res) {
@@ -246,7 +257,7 @@ inline void register_security_routes(httplib::Server& svr) {
             mysql_free_result(acc_res);
             if (status != "closed") {
               db.exec("INSERT INTO users (username, secret_hash, role) VALUES ('" + esc_acc +
-                      "', SHA2('1234', 256), 'customer') ON DUPLICATE KEY UPDATE secret_hash = VALUES(secret_hash)");
+                      "', SHA2('1234', 256), 'customer')");
               std::string json = "{\"role\": \"customer\", \"account_number\": " + esc_acc +
                                  ", \"token\": \"cust_" + esc_acc + "_token\"}";
               res.status = 200;
