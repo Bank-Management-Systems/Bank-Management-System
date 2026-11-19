@@ -47,6 +47,9 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r tests/requirements.txt
 
+      - name: Run linting & static code analysis
+        run: bash scripts/lint.sh
+
       - name: Import database schema and seed data
         run: |
           mysql -h 127.0.0.1 -P 3306 -uroot -proot < database/schema.sql
